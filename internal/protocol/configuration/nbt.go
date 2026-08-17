@@ -89,7 +89,7 @@ func (c *Compound) add(kind byte, name string, data []byte) *Compound {
 }
 
 func (c *Compound) Encode(maxSize int) ([]byte, error) {
-	data := append([]byte{nbtCompound}, appendStringPayload("")...)
+	data := []byte{nbtCompound}
 	data = append(data, c.encodePayload()...)
 	if len(data) > maxSize {
 		return nil, ErrNBTTooLarge

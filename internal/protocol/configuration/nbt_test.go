@@ -15,8 +15,8 @@ func TestRegistryDataPayload(t *testing.T) {
 	if err != nil || id != 0x05 || len(body) < 3 {
 		t.Fatalf("id=%d body=%d err=%v", id, len(body), err)
 	}
-	if body[0] != 10 || body[1] != 0 || body[2] != 0 {
-		t.Fatalf("unexpected root compound header: %x", body[:3])
+	if body[0] != 10 || body[len(body)-1] != 0 {
+		t.Fatalf("unexpected root compound framing: %x...%x", body[:1], body[len(body)-1:])
 	}
 }
 

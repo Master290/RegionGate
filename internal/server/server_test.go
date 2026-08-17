@@ -162,6 +162,27 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	if err != nil || joinID != play.ClientboundJoinGameID {
 		t.Fatalf("join id=%d err=%v", joinID, err)
 	}
+	for _, wantID := range []int32{
+		play.ClientboundChunkBatchStartID,
+		play.ClientboundMapChunkID,
+		play.ClientboundChunkBatchFinishedID,
+		play.ClientboundSpawnPositionID,
+		play.ClientboundPositionLookID,
+	} {
+		frame, err := framer.ReadFrame(reader, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _, err := codec.PacketID(frame)
+		if err != nil || id != wantID {
+			t.Fatalf("play initialization id=%d want=%d err=%v", id, wantID, err)
+		}
+	}
+	confirm := codec.AppendVarInt(nil, play.ServerboundTeleportConfirmID)
+	confirm = codec.AppendVarInt(confirm, 1)
+	if err := framer.WriteFrame(clientConn, confirm); err != nil {
+		t.Fatal(err)
+	}
 	keepAlive, err := framer.ReadFrame(reader, nil)
 	if err != nil {
 		t.Fatal(err)

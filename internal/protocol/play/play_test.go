@@ -43,3 +43,43 @@ func TestJoinGameContainsExpectedScalars(t *testing.T) {
 		t.Fatalf("game modes: hardcore=%d game=%d previous=%d", body[4], body[5], body[6])
 	}
 }
+
+func TestPositionAndTeleportConfirm(t *testing.T) {
+	position := PositionLookPayload(0.5, 64, 0.5, 90, 0, 17)
+	id, body, err := codec.PacketID(position)
+	if err != nil || id != ClientboundPositionLookID || len(body) != 34 {
+		t.Fatalf("position id=%d body=%d err=%v", id, len(body), err)
+	}
+
+	confirm := codec.AppendVarInt(nil, ServerboundTeleportConfirmID)
+	confirm = codec.AppendVarInt(confirm, 17)
+	teleportID, err := ParseTeleportConfirm(confirm)
+	if err != nil || teleportID != 17 {
+		t.Fatalf("teleport id=%d err=%v", teleportID, err)
+	}
+}
+
+func TestVoidChunkPacket(t *testing.T) {
+	payload := VoidChunkPayload(0, 0)
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ClientboundMapChunkID || len(body) < 16 {
+		t.Fatalf("chunk id=%d body=%d err=%v", id, len(body), err)
+	}
+	if gotX, gotZ := int32(binary.BigEndian.Uint32(body[:4])), int32(binary.BigEndian.Uint32(body[4:8])); gotX != 0 || gotZ != 0 {
+		t.Fatalf("chunk coordinates=%d,%d", gotX, gotZ)
+	}
+	if body[8] != 10 || body[9] != 0 {
+		t.Fatalf("heightmaps root=%x", body[8:10])
+	}
+}
+
+func TestSpawnPosition(t *testing.T) {
+	payload := SpawnPositionPayload(0, 64, 0, 0)
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ClientboundSpawnPositionID || len(body) != 12 {
+		t.Fatalf("spawn id=%d body=%d err=%v", id, len(body), err)
+	}
+	if packed := binary.BigEndian.Uint64(body[:8]); packed != 64 {
+		t.Fatalf("packed position=%x", packed)
+	}
+}

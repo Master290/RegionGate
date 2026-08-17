@@ -3,6 +3,7 @@ package play
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 )
@@ -10,13 +11,20 @@ import (
 var ErrMalformed = errors.New("malformed play packet")
 
 const (
-	ClientboundJoinGameID     = 0x29
-	ClientboundKeepAliveID    = 0x24
-	ClientboundPositionLookID = 0x3E
-	ServerboundKeepAliveID    = 0x15
-	ServerboundPositionID     = 0x17
-	ServerboundPositionLookID = 0x18
+	ClientboundChunkBatchFinishedID = 0x0C
+	ClientboundChunkBatchStartID    = 0x0D
+	ClientboundJoinGameID           = 0x29
+	ClientboundKeepAliveID          = 0x24
+	ClientboundMapChunkID           = 0x25
+	ClientboundPositionLookID       = 0x3E
+	ClientboundSpawnPositionID      = 0x54
+	ServerboundTeleportConfirmID    = 0x00
+	ServerboundKeepAliveID          = 0x15
+	ServerboundPositionID           = 0x17
+	ServerboundPositionLookID       = 0x18
 )
+
+const overworldSectionCount = 24
 
 type JoinGameConfig struct {
 	EntityID           int32
@@ -76,6 +84,68 @@ func KeepAlivePayload(id int64) []byte {
 	return append(payload, raw[:]...)
 }
 
+func ChunkBatchStartPayload() []byte {
+	return codec.AppendVarInt(nil, ClientboundChunkBatchStartID)
+}
+
+func ChunkBatchFinishedPayload(size int32) []byte {
+	payload := codec.AppendVarInt(nil, ClientboundChunkBatchFinishedID)
+	return codec.AppendVarInt(payload, size)
+}
+
+func VoidChunkPayload(x, z int32) []byte {
+	payload := codec.AppendVarInt(nil, ClientboundMapChunkID)
+	payload = appendInt32(payload, x)
+	payload = appendInt32(payload, z)
+	payload = append(payload, 10, 0) // empty anonymous root compound for heightmaps
+
+	chunkData := make([]byte, 0, overworldSectionCount*8)
+	for range overworldSectionCount {
+		chunkData = append(chunkData, 0, 0)    // non-air block count
+		chunkData = append(chunkData, 0, 0, 0) // air single-value palette
+		chunkData = append(chunkData, 0, 0, 0) // plains single-value biome palette
+	}
+	payload = codec.AppendVarInt(payload, int32(len(chunkData)))
+	payload = append(payload, chunkData...)
+	payload = codec.AppendVarInt(payload, 0) // block entities
+	for range 6 {
+		payload = codec.AppendVarInt(payload, 0) // light masks and light arrays
+	}
+	return payload
+}
+
+func SpawnPositionPayload(x, y, z int32, angle float32) []byte {
+	payload := codec.AppendVarInt(nil, ClientboundSpawnPositionID)
+	packed := (uint64(uint32(x)&0x3ffffff) << 38) | (uint64(uint32(z)&0x3ffffff) << 12) | uint64(uint32(y)&0xfff)
+	var position [8]byte
+	binary.BigEndian.PutUint64(position[:], packed)
+	payload = append(payload, position[:]...)
+	return appendFloat32(payload, angle)
+}
+
+func PositionLookPayload(x, y, z float64, yaw, pitch float32, teleportID int32) []byte {
+	payload := codec.AppendVarInt(nil, ClientboundPositionLookID)
+	payload = appendFloat64(payload, x)
+	payload = appendFloat64(payload, y)
+	payload = appendFloat64(payload, z)
+	payload = appendFloat32(payload, yaw)
+	payload = appendFloat32(payload, pitch)
+	payload = append(payload, 0) // all coordinates are absolute
+	return codec.AppendVarInt(payload, teleportID)
+}
+
+func ParseTeleportConfirm(payload []byte) (int32, error) {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ServerboundTeleportConfirmID {
+		return 0, ErrMalformed
+	}
+	teleportID, used, err := codec.ConsumeVarInt(body)
+	if err != nil || used != len(body) {
+		return 0, ErrMalformed
+	}
+	return teleportID, nil
+}
+
 func ParseKeepAlive(payload []byte) (int64, error) {
 	id, body, err := codec.PacketID(payload)
 	if err != nil || id != ServerboundKeepAliveID || len(body) != 8 {
@@ -103,4 +173,20 @@ func appendBool(dst []byte, value bool) []byte {
 		return append(dst, 1)
 	}
 	return append(dst, 0)
+}
+
+func appendInt32(dst []byte, value int32) []byte {
+	var raw [4]byte
+	binary.BigEndian.PutUint32(raw[:], uint32(value))
+	return append(dst, raw[:]...)
+}
+
+func appendFloat32(dst []byte, value float32) []byte {
+	return appendInt32(dst, int32(math.Float32bits(value)))
+}
+
+func appendFloat64(dst []byte, value float64) []byte {
+	var raw [8]byte
+	binary.BigEndian.PutUint64(raw[:], math.Float64bits(value))
+	return append(dst, raw[:]...)
 }

@@ -156,6 +156,31 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 	if err := framer.WriteFrame(conn, join); err != nil {
 		return err
 	}
+	for _, payload := range [][]byte{
+		play.ChunkBatchStartPayload(),
+		play.VoidChunkPayload(0, 0),
+		play.ChunkBatchFinishedPayload(1),
+		play.SpawnPositionPayload(0, 64, 0, 0),
+		play.PositionLookPayload(0.5, 64, 0.5, 0, 0, 1),
+	} {
+		if err := framer.WriteFrame(conn, payload); err != nil {
+			return err
+		}
+	}
+
+	for {
+		frame, err := framer.ReadFrame(reader, nil)
+		if err != nil {
+			return err
+		}
+		teleportID, err := play.ParseTeleportConfirm(frame)
+		if err == nil {
+			if teleportID != 1 {
+				return play.ErrMalformed
+			}
+			break
+		}
+	}
 
 	keepAliveID := int64(1)
 	if err := framer.WriteFrame(conn, play.KeepAlivePayload(keepAliveID)); err != nil {
