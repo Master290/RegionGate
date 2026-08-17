@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
+	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
+	"github.com/Master290/RegionGate/internal/protocol/login"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 )
 
@@ -94,6 +96,59 @@ func TestServerShutdownClosesConnections(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	s := New(Config{}, nil)
+	done := make(chan struct{})
+	go func() {
+		s.serveConn(serverConn)
+		close(done)
+	}()
+
+	framer := codec.NewFramer(1024)
+	if err := framer.WriteFrame(clientConn, handshakePayload(handshake.NextLogin)); err != nil {
+		t.Fatal(err)
+	}
+	start := codec.AppendVarInt(nil, login.ServerboundLoginStartID)
+	start = codec.AppendString(start, "Daniar")
+	if err := framer.WriteFrame(clientConn, start); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := bufio.NewReader(clientConn)
+	success, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, username, err := login.ReadUUID(success); err != nil || username != "Daniar" {
+		t.Fatalf("login success username=%q err=%v", username, err)
+	}
+
+	if err := framer.WriteFrame(clientConn, codec.AppendVarInt(nil, login.ServerboundLoginAckID)); err != nil {
+		t.Fatal(err)
+	}
+	finish, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishID, finishBody, err := codec.PacketID(finish)
+	if err != nil || finishID != configuration.ClientboundFinishConfigurationID || len(finishBody) != 0 {
+		t.Fatalf("finish id=%d body=%x err=%v", finishID, finishBody, err)
+	}
+
+	if err := framer.WriteFrame(clientConn, codec.AppendVarInt(nil, configuration.ServerboundFinishConfigurationID)); err != nil {
+		t.Fatal(err)
+	}
+	_ = clientConn.Close()
+	_ = serverConn.Close()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

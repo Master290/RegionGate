@@ -10,11 +10,12 @@ import (
 	"sync"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
+	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
+	"github.com/Master290/RegionGate/internal/protocol/login"
 	"github.com/Master290/RegionGate/internal/protocol/status"
+	"github.com/Master290/RegionGate/internal/session"
 )
-
-var ErrLoginNotImplemented = errors.New("Minecraft login flow is not implemented yet")
 
 type Config struct {
 	MaxConnections int
@@ -90,8 +91,44 @@ func (s *Server) serveConn(conn net.Conn) {
 	case handshake.NextStatus:
 		s.serveStatus(conn, reader, framer)
 	case handshake.NextLogin:
-		s.logger.Debug("login connection accepted", "remote", conn.RemoteAddr())
+		s.serveLogin(conn, reader, framer)
 	}
+}
+
+func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.Framer) {
+	state := session.New()
+	if err := state.Transition(session.StateLogin); err != nil {
+		return
+	}
+	frame, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		return
+	}
+	start, err := login.ParseStart(frame)
+	if err != nil {
+		return
+	}
+	if err := framer.WriteFrame(conn, login.SuccessPayload(start.Username)); err != nil {
+		return
+	}
+	frame, err = framer.ReadFrame(reader, nil)
+	if err != nil || login.ParseAcknowledged(frame) != nil {
+		return
+	}
+	if err := state.Transition(session.StateConfiguration); err != nil {
+		return
+	}
+	if err := framer.WriteFrame(conn, configuration.FinishPayload()); err != nil {
+		return
+	}
+	frame, err = framer.ReadFrame(reader, nil)
+	if err != nil || configuration.ParseFinishAcknowledged(frame) != nil {
+		return
+	}
+	if err := state.Transition(session.StateLimboPlay); err != nil {
+		return
+	}
+	s.logger.Debug("offline login completed", "remote", conn.RemoteAddr(), "username", start.Username)
 }
 
 func (s *Server) serveStatus(conn net.Conn, reader *bufio.Reader, framer *codec.Framer) {
