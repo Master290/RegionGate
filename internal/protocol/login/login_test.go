@@ -9,6 +9,7 @@ import (
 func TestLoginFlowPackets(t *testing.T) {
 	startPayload := codec.AppendVarInt(nil, ServerboundLoginStartID)
 	startPayload = codec.AppendString(startPayload, "Daniar")
+	startPayload = append(startPayload, make([]byte, 16)...)
 	start, err := ParseStart(startPayload)
 	if err != nil || start.Username != "Daniar" {
 		t.Fatalf("start=%#v err=%v", start, err)

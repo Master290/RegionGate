@@ -18,6 +18,7 @@ const (
 
 type Start struct {
 	Username string
+	UUID     [16]byte
 }
 
 func ParseStart(payload []byte) (Start, error) {
@@ -26,13 +27,15 @@ func ParseStart(payload []byte) (Start, error) {
 		return Start{}, ErrMalformed
 	}
 	username, used, err := readString(body, 16)
-	if err != nil || len(body) != used {
+	if err != nil || len(body) != used+16 {
 		return Start{}, ErrMalformed
 	}
 	if !validUsername(username) {
 		return Start{}, ErrMalformed
 	}
-	return Start{Username: username}, nil
+	var uid [16]byte
+	copy(uid[:], body[used:])
+	return Start{Username: username, UUID: uid}, nil
 }
 
 func validUsername(username string) bool {

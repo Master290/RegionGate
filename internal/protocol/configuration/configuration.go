@@ -9,8 +9,8 @@ import (
 var ErrMalformed = errors.New("malformed configuration packet")
 
 const (
-	ClientboundFinishConfigurationID = 0x03
-	ServerboundFinishConfigurationID = 0x03
+	ClientboundFinishConfigurationID = 0x02
+	ServerboundFinishConfigurationID = 0x02
 )
 
 func FinishPayload() []byte {

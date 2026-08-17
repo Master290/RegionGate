@@ -12,6 +12,7 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
 	"github.com/Master290/RegionGate/internal/protocol/login"
+	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 )
 
@@ -116,6 +117,7 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	}
 	start := codec.AppendVarInt(nil, login.ServerboundLoginStartID)
 	start = codec.AppendString(start, "Daniar")
+	start = append(start, make([]byte, 16)...)
 	if err := framer.WriteFrame(clientConn, start); err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +144,26 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	}
 
 	if err := framer.WriteFrame(clientConn, codec.AppendVarInt(nil, configuration.ServerboundFinishConfigurationID)); err != nil {
+		t.Fatal(err)
+	}
+	join, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinID, _, err := codec.PacketID(join)
+	if err != nil || joinID != play.ClientboundJoinGameID {
+		t.Fatalf("join id=%d err=%v", joinID, err)
+	}
+	keepAlive, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keepAliveID, keepAliveBody, err := codec.PacketID(keepAlive)
+	if err != nil || keepAliveID != play.ClientboundKeepAliveID || len(keepAliveBody) != 8 {
+		t.Fatalf("keepalive id=%d body=%x err=%v", keepAliveID, keepAliveBody, err)
+	}
+	response := append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), keepAliveBody...)
+	if err := framer.WriteFrame(clientConn, response); err != nil {
 		t.Fatal(err)
 	}
 	_ = clientConn.Close()

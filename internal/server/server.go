@@ -13,6 +13,7 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
 	"github.com/Master290/RegionGate/internal/protocol/login"
+	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 	"github.com/Master290/RegionGate/internal/session"
 )
@@ -128,7 +129,53 @@ func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.F
 	if err := state.Transition(session.StateLimboPlay); err != nil {
 		return
 	}
+	if err := s.serveLimbo(conn, reader, framer, start.Username); err != nil {
+		return
+	}
 	s.logger.Debug("offline login completed", "remote", conn.RemoteAddr(), "username", start.Username)
+}
+
+func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.Framer, username string) error {
+	join := play.JoinGamePayload(play.JoinGameConfig{
+		EntityID:           1,
+		WorldName:          "minecraft:overworld",
+		MaxPlayers:         1,
+		ViewDistance:       8,
+		SimulationDistance: 8,
+		DimensionType:      "minecraft:overworld",
+		DimensionName:      "minecraft:overworld",
+		GameMode:           2,
+		PreviousGameMode:   -1,
+		RespawnScreen:      true,
+		PortalCooldown:     0,
+	})
+	if err := framer.WriteFrame(conn, join); err != nil {
+		return err
+	}
+
+	keepAliveID := int64(1)
+	if err := framer.WriteFrame(conn, play.KeepAlivePayload(keepAliveID)); err != nil {
+		return err
+	}
+	for {
+		frame, err := framer.ReadFrame(reader, nil)
+		if err != nil {
+			return err
+		}
+		if id, _, packetErr := codec.PacketID(frame); packetErr == nil && id == play.ServerboundKeepAliveID {
+			value, err := play.ParseKeepAlive(frame)
+			if err != nil || value != keepAliveID {
+				return play.ErrMalformed
+			}
+			return nil
+		}
+		if id, _, packetErr := codec.PacketID(frame); packetErr == nil && (id == play.ServerboundPositionID || id == play.ServerboundPositionLookID) {
+			if err := play.ParseMovement(frame); err != nil {
+				return err
+			}
+			continue
+		}
+	}
 }
 
 func (s *Server) serveStatus(conn net.Conn, reader *bufio.Reader, framer *codec.Framer) {
