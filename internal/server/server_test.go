@@ -134,6 +134,14 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	if err := framer.WriteFrame(clientConn, codec.AppendVarInt(nil, login.ServerboundLoginAckID)); err != nil {
 		t.Fatal(err)
 	}
+	registry, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registryID, registryBody, err := codec.PacketID(registry)
+	if err != nil || registryID != 0x05 || len(registryBody) < 3 {
+		t.Fatalf("registry id=%d body=%d err=%v", registryID, len(registryBody), err)
+	}
 	finish, err := framer.ReadFrame(reader, nil)
 	if err != nil {
 		t.Fatal(err)

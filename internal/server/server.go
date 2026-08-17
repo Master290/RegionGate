@@ -119,6 +119,10 @@ func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.F
 	if err := state.Transition(session.StateConfiguration); err != nil {
 		return
 	}
+	registry, err := configuration.RegistryDataPayload(configuration.MinimalRegistryData())
+	if err != nil || framer.WriteFrame(conn, registry) != nil {
+		return
+	}
 	if err := framer.WriteFrame(conn, configuration.FinishPayload()); err != nil {
 		return
 	}
