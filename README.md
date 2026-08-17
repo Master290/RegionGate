@@ -15,36 +15,21 @@ The current implementation is an early MVP focused strictly on **Minecraft Java 
 
 ## Architecture
 
-```text
-Minecraft Client
-       |
-       v
-+-------------------+
-| TCP Acceptor      |
-| Connection Limits |
-+-------------------+
-       |
-       v
-+-------------------------------+
-| Minecraft 1.20.4 State Machine|
-| Handshake -> Login -> Config   |
-+-------------------------------+
-       |
-       +-------------------+
-       |                   |
-       v                   v
-+--------------+    +----------------+
-| Limbo Engine |    | Backend Bridge |
-| Void World   |    | Velocity HMAC  |
-+--------------+    +----------------+
-       |                   |
-       +---------+---------+
-                 |
-                 v
-       +------------------+
-       | Transfer Barrier |
-       | Filter / Replay  |
-       +------------------+
+```mermaid
+flowchart TD
+    client["Minecraft Client"]
+    acceptor["TCP Acceptor<br/>Connection Limits"]
+    state["Minecraft 1.20.4 State Machine<br/>Handshake -> Login -> Configuration"]
+    limbo["Limbo Engine<br/>Void World"]
+    backend["Backend Bridge<br/>Velocity HMAC"]
+    barrier["Transfer Barrier<br/>Filter / Replay"]
+
+    client --> acceptor
+    acceptor --> state
+    state --> limbo
+    state --> backend
+    limbo --> barrier
+    backend --> barrier
 ```
 
 Client and backend connections use separate transport state. Encryption, compression, framing, KeepAlive identifiers, and protocol states are never shared between sockets.
