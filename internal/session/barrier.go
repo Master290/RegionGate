@@ -18,7 +18,9 @@ const (
 	BarrierDraining BarrierPhase = iota
 	BarrierBackendLogin
 	BarrierBackendConfiguration
-	BarrierAwaitingClientConfiguration
+	BarrierAwaitingClientConfigurationStart
+	BarrierClientConfiguration
+	BarrierAwaitingClientConfigurationFinish
 	BarrierReady
 )
 
@@ -59,6 +61,7 @@ type Input struct {
 	Kind        InputKind
 	KeepAliveID int64
 	Position    Position
+	HasLook     bool
 	Command     PlayerCommand
 }
 
@@ -104,6 +107,10 @@ func (b *barrierState) handle(input Input) (InputDisposition, error) {
 		return InputConsumed, nil
 	case InputMovement:
 		position := input.Position
+		if !input.HasLook && b.latestPosition != nil {
+			position.Yaw = b.latestPosition.Yaw
+			position.Pitch = b.latestPosition.Pitch
+		}
 		b.latestPosition = &position
 		return InputCoalesced, nil
 	case InputPlayerCommand:

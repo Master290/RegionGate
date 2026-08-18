@@ -24,11 +24,12 @@ func TestSessionTransferBarrier(t *testing.T) {
 	}
 
 	position := Position{X: 1, Y: 2, Z: 3, Yaw: 4, Pitch: 5, OnGround: true}
-	disposition, err = s.HandleBarrierInput(Input{Kind: InputMovement, Position: position})
+	disposition, err = s.HandleBarrierInput(Input{Kind: InputMovement, Position: position, HasLook: true})
 	if err != nil || disposition != InputCoalesced {
 		t.Fatalf("movement: disposition=%d err=%v", disposition, err)
 	}
 	position.X = 99
+	position.Yaw = 88
 	if _, err := s.HandleBarrierInput(Input{Kind: InputMovement, Position: position}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestSessionTransferBarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, phase := range []BarrierPhase{BarrierBackendLogin, BarrierBackendConfiguration, BarrierAwaitingClientConfiguration, BarrierReady} {
+	for _, phase := range []BarrierPhase{BarrierBackendLogin, BarrierBackendConfiguration, BarrierAwaitingClientConfigurationStart, BarrierClientConfiguration, BarrierAwaitingClientConfigurationFinish, BarrierReady} {
 		if err := s.AdvanceBarrier(phase); err != nil {
 			t.Fatalf("advance barrier to %d: %v", phase, err)
 		}
@@ -57,6 +58,9 @@ func TestSessionTransferBarrier(t *testing.T) {
 	}
 	if replay.Position == nil || replay.Position.X != 99 {
 		t.Fatalf("replayed position = %#v", replay.Position)
+	}
+	if replay.Position.Yaw != 4 {
+		t.Fatalf("position-only update replaced yaw: %#v", replay.Position)
 	}
 	if len(replay.Commands) != 1 || replay.Commands[0] != command {
 		t.Fatalf("replayed commands = %#v", replay.Commands)

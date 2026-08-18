@@ -45,6 +45,15 @@ func TestPreparedLifecycleRequiresClientAcknowledgement(t *testing.T) {
 	if prepared.ConfigurationPackets()[0][0] != 1 {
 		t.Fatal("configuration packets were not copied")
 	}
+	if err := prepared.AcknowledgeClientStart(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := prepared.Release(); !errors.Is(err, session.ErrBarrierNotReady) {
+		t.Fatalf("release before finish error=%v", err)
+	}
+	if err := prepared.MarkClientConfigurationSent(); err != nil {
+		t.Fatal(err)
+	}
 	if err := prepared.AcknowledgeClientConfiguration(); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +118,7 @@ func sessionAtAwaitingClientConfiguration(t *testing.T) *session.Session {
 	if err := state.BeginTransfer(time.Unix(1, 0), []int64{1}, 4); err != nil {
 		t.Fatal(err)
 	}
-	for _, phase := range []session.BarrierPhase{session.BarrierBackendLogin, session.BarrierBackendConfiguration, session.BarrierAwaitingClientConfiguration} {
+	for _, phase := range []session.BarrierPhase{session.BarrierBackendLogin, session.BarrierBackendConfiguration, session.BarrierAwaitingClientConfigurationStart} {
 		if err := state.AdvanceBarrier(phase); err != nil {
 			t.Fatal(err)
 		}

@@ -2,6 +2,7 @@ package play
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
@@ -56,6 +57,36 @@ func TestPositionAndTeleportConfirm(t *testing.T) {
 	teleportID, err := ParseTeleportConfirm(confirm)
 	if err != nil || teleportID != 17 {
 		t.Fatalf("teleport id=%d err=%v", teleportID, err)
+	}
+}
+
+func TestConfigurationTransitionAndMovementEncoding(t *testing.T) {
+	if id, body, err := codec.PacketID(StartConfigurationPayload()); err != nil || id != ClientboundStartConfigurationID || len(body) != 0 {
+		t.Fatalf("start configuration id=%d body=%x err=%v", id, body, err)
+	}
+	if err := ParseConfigurationAcknowledged(codec.AppendVarInt(nil, ServerboundConfigurationAcknowledgedID)); err != nil {
+		t.Fatal(err)
+	}
+	encoded := ServerboundPositionLookPayload(1.25, 64, -2.5, 90, -10, true)
+	movement, err := DecodeMovement(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if movement.X != 1.25 || movement.Y != 64 || movement.Z != -2.5 || movement.Yaw != 90 || movement.Pitch != -10 || !movement.OnGround || !movement.HasLook {
+		t.Fatalf("movement=%+v", movement)
+	}
+	position, err := DecodeMovement(ServerboundPositionPayload(2, 65, 3, false))
+	if err != nil || position.HasLook || position.OnGround {
+		t.Fatalf("position=%+v err=%v", position, err)
+	}
+	if err := ParseMovement(append(codec.AppendVarInt(nil, ServerboundPositionID), make([]byte, 24)...)); err == nil {
+		t.Fatal("expected malformed movement body")
+	}
+}
+
+func TestMovementRejectsNonFiniteValues(t *testing.T) {
+	if _, err := DecodeMovement(ServerboundPositionPayload(math.Inf(1), 0, 0, true)); err == nil {
+		t.Fatal("expected non-finite movement rejection")
 	}
 }
 

@@ -80,7 +80,7 @@ func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, ident
 	if err != nil {
 		return rollback(err, backendConn)
 	}
-	if err := state.AdvanceBarrier(session.BarrierAwaitingClientConfiguration); err != nil {
+	if err := state.AdvanceBarrier(session.BarrierAwaitingClientConfigurationStart); err != nil {
 		return rollback(err, backendConn)
 	}
 	prepared := &Prepared{session: state, backend: backendConn, packets: configuration.Packets, done: make(chan struct{})}
@@ -123,6 +123,24 @@ func (p *Prepared) ConfigurationPackets() [][]byte {
 		packets[i] = append([]byte(nil), packet...)
 	}
 	return packets
+}
+
+func (p *Prepared) AcknowledgeClientStart() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finalized {
+		return ErrTransferAlreadyFinalized
+	}
+	return p.session.AdvanceBarrier(session.BarrierClientConfiguration)
+}
+
+func (p *Prepared) MarkClientConfigurationSent() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finalized {
+		return ErrTransferAlreadyFinalized
+	}
+	return p.session.AdvanceBarrier(session.BarrierAwaitingClientConfigurationFinish)
 }
 
 func (p *Prepared) AcknowledgeClientConfiguration() error {

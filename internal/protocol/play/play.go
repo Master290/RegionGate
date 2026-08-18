@@ -11,17 +11,20 @@ import (
 var ErrMalformed = errors.New("malformed play packet")
 
 const (
-	ClientboundChunkBatchFinishedID = 0x0C
-	ClientboundChunkBatchStartID    = 0x0D
-	ClientboundJoinGameID           = 0x29
-	ClientboundKeepAliveID          = 0x24
-	ClientboundMapChunkID           = 0x25
-	ClientboundPositionLookID       = 0x3E
-	ClientboundSpawnPositionID      = 0x54
-	ServerboundTeleportConfirmID    = 0x00
-	ServerboundKeepAliveID          = 0x15
-	ServerboundPositionID           = 0x17
-	ServerboundPositionLookID       = 0x18
+	ClientboundChunkBatchFinishedID        = 0x0C
+	ClientboundChunkBatchStartID           = 0x0D
+	ClientboundJoinGameID                  = 0x29
+	ClientboundKeepAliveID                 = 0x24
+	ClientboundMapChunkID                  = 0x25
+	ClientboundPositionLookID              = 0x3E
+	ClientboundSpawnPositionID             = 0x54
+	ClientboundStartConfigurationID        = 0x67
+	ServerboundConfigurationAcknowledgedID = 0x0B
+	ServerboundTeleportConfirmID           = 0x00
+	ServerboundKeepAliveID                 = 0x15
+	ServerboundPositionID                  = 0x17
+	ServerboundPositionLookID              = 0x18
+	ServerboundPlayerCommandID             = 0x22
 )
 
 const overworldSectionCount = 24
@@ -44,6 +47,16 @@ type JoinGameConfig struct {
 	Debug              bool
 	Flat               bool
 	PortalCooldown     int32
+}
+
+type Movement struct {
+	X        float64
+	Y        float64
+	Z        float64
+	Yaw      float32
+	Pitch    float32
+	OnGround bool
+	HasLook  bool
 }
 
 func JoinGamePayload(config JoinGameConfig) []byte {
@@ -134,6 +147,43 @@ func PositionLookPayload(x, y, z float64, yaw, pitch float32, teleportID int32) 
 	return codec.AppendVarInt(payload, teleportID)
 }
 
+func StartConfigurationPayload() []byte {
+	return codec.AppendVarInt(nil, ClientboundStartConfigurationID)
+}
+
+func ParseConfigurationAcknowledged(payload []byte) error {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ServerboundConfigurationAcknowledgedID || len(body) != 0 {
+		return ErrMalformed
+	}
+	return nil
+}
+
+func ServerboundPositionPayload(x, y, z float64, onGround bool) []byte {
+	payload := codec.AppendVarInt(nil, ServerboundPositionID)
+	payload = appendFloat64(payload, x)
+	payload = appendFloat64(payload, y)
+	payload = appendFloat64(payload, z)
+	return appendBool(payload, onGround)
+}
+
+func ServerboundPositionLookPayload(x, y, z float64, yaw, pitch float32, onGround bool) []byte {
+	payload := codec.AppendVarInt(nil, ServerboundPositionLookID)
+	payload = appendFloat64(payload, x)
+	payload = appendFloat64(payload, y)
+	payload = appendFloat64(payload, z)
+	payload = appendFloat32(payload, yaw)
+	payload = appendFloat32(payload, pitch)
+	return appendBool(payload, onGround)
+}
+
+func PlayerCommandPayload(entityID, actionID, data int32) []byte {
+	payload := codec.AppendVarInt(nil, ServerboundPlayerCommandID)
+	payload = codec.AppendVarInt(payload, entityID)
+	payload = codec.AppendVarInt(payload, actionID)
+	return codec.AppendVarInt(payload, data)
+}
+
 func ParseTeleportConfirm(payload []byte) (int32, error) {
 	id, body, err := codec.PacketID(payload)
 	if err != nil || id != ServerboundTeleportConfirmID {
@@ -155,17 +205,43 @@ func ParseKeepAlive(payload []byte) (int64, error) {
 }
 
 func ParseMovement(payload []byte) error {
+	_, err := DecodeMovement(payload)
+	return err
+}
+
+func DecodeMovement(payload []byte) (Movement, error) {
 	id, body, err := codec.PacketID(payload)
 	if err != nil || (id != ServerboundPositionID && id != ServerboundPositionLookID) {
-		return ErrMalformed
+		return Movement{}, ErrMalformed
 	}
 	if id == ServerboundPositionID && len(body) != 25 {
-		return ErrMalformed
+		return Movement{}, ErrMalformed
 	}
 	if id == ServerboundPositionLookID && len(body) != 33 {
-		return ErrMalformed
+		return Movement{}, ErrMalformed
 	}
-	return nil
+	movement := Movement{
+		X:       math.Float64frombits(binary.BigEndian.Uint64(body[0:8])),
+		Y:       math.Float64frombits(binary.BigEndian.Uint64(body[8:16])),
+		Z:       math.Float64frombits(binary.BigEndian.Uint64(body[16:24])),
+		HasLook: id == ServerboundPositionLookID,
+	}
+	onGroundOffset := 24
+	if movement.HasLook {
+		movement.Yaw = math.Float32frombits(binary.BigEndian.Uint32(body[24:28]))
+		movement.Pitch = math.Float32frombits(binary.BigEndian.Uint32(body[28:32]))
+		onGroundOffset = 32
+	}
+	if body[onGroundOffset] > 1 || !finite64(movement.X) || !finite64(movement.Y) || !finite64(movement.Z) || !finite32(movement.Yaw) || !finite32(movement.Pitch) {
+		return Movement{}, ErrMalformed
+	}
+	movement.OnGround = body[onGroundOffset] == 1
+	return movement, nil
+}
+
+func finite64(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }
+func finite32(value float32) bool {
+	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
 }
 
 func appendBool(dst []byte, value bool) []byte {
