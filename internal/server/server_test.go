@@ -105,6 +105,27 @@ func TestServerShutdownClosesConnections(t *testing.T) {
 	}
 }
 
+func TestServerEnforcesPerIPConnectionLimit(t *testing.T) {
+	first, firstPeer := net.Pipe()
+	second, secondPeer := net.Pipe()
+	defer first.Close()
+	defer firstPeer.Close()
+	defer second.Close()
+	defer secondPeer.Close()
+	s := New(Config{MaxConnectionsPerIP: 1}, nil)
+	if !s.track(first) {
+		t.Fatal("first connection was rejected")
+	}
+	if s.track(second) {
+		t.Fatal("second connection from same address was accepted")
+	}
+	s.untrack(first)
+	if !s.track(second) {
+		t.Fatal("connection slot was not released")
+	}
+	s.untrack(second)
+}
+
 func TestServerHandshakeTimeoutClosesSilentConnection(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()

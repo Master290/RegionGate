@@ -24,6 +24,7 @@ import (
 
 type Config struct {
 	MaxConnections      int
+	MaxConnectionsPerIP int
 	MaxPacketSize       int
 	HandshakeTimeout    time.Duration
 	StatusTimeout       time.Duration
@@ -36,14 +37,15 @@ type Config struct {
 }
 
 type Server struct {
-	config     Config
-	logger     *slog.Logger
-	sem        chan struct{}
-	mu         sync.Mutex
-	conns      map[net.Conn]struct{}
-	sessions   map[net.Conn]*session.Session
-	clients    map[net.Conn]*transport.Transport
-	admissions map[net.Conn]chan admissionRequest
+	config        Config
+	logger        *slog.Logger
+	sem           chan struct{}
+	mu            sync.Mutex
+	conns         map[net.Conn]struct{}
+	sessions      map[net.Conn]*session.Session
+	clients       map[net.Conn]*transport.Transport
+	admissions    map[net.Conn]chan admissionRequest
+	ipConnections map[string]int
 }
 
 type admissionRequest struct {
@@ -62,6 +64,9 @@ func New(config Config, logger *slog.Logger) *Server {
 	}
 	if config.MaxPacketSize <= 0 {
 		config.MaxPacketSize = codec.DefaultMaxPacketSize
+	}
+	if config.MaxConnectionsPerIP <= 0 {
+		config.MaxConnectionsPerIP = 16
 	}
 	if config.HandshakeTimeout <= 0 {
 		config.HandshakeTimeout = 10 * time.Second
@@ -84,7 +89,7 @@ func New(config Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport), admissions: make(map[net.Conn]chan admissionRequest)}
+	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport), admissions: make(map[net.Conn]chan admissionRequest), ipConnections: make(map[string]int)}
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
@@ -113,7 +118,11 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		}
 		select {
 		case s.sem <- struct{}{}:
-			s.track(conn)
+			if !s.track(conn) {
+				<-s.sem
+				_ = conn.Close()
+				continue
+			}
 			if ctx.Err() != nil {
 				_ = conn.Close()
 			}
@@ -491,10 +500,16 @@ func (s *Server) writeFrame(client *transport.Transport, payload []byte) error {
 	return client.WriteFrame(payload)
 }
 
-func (s *Server) track(conn net.Conn) {
+func (s *Server) track(conn net.Conn) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	ip := remoteHost(conn.RemoteAddr())
+	if s.ipConnections[ip] >= s.config.MaxConnectionsPerIP {
+		return false
+	}
 	s.conns[conn] = struct{}{}
-	s.mu.Unlock()
+	s.ipConnections[ip]++
+	return true
 }
 
 func (s *Server) trackSession(conn net.Conn, state *session.Session) {
@@ -581,7 +596,13 @@ func (s *Server) ClientTransport(conn net.Conn) (*transport.Transport, bool) {
 
 func (s *Server) untrack(conn net.Conn) {
 	s.mu.Lock()
+	ip := remoteHost(conn.RemoteAddr())
 	delete(s.conns, conn)
+	if count := s.ipConnections[ip]; count <= 1 {
+		delete(s.ipConnections, ip)
+	} else {
+		s.ipConnections[ip] = count - 1
+	}
 	s.mu.Unlock()
 }
 
