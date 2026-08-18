@@ -25,6 +25,8 @@ var compressionWriterPool = sync.Pool{
 	},
 }
 
+var compressionReaderPool sync.Pool
+
 type CompressionState struct {
 	threshold     int
 	maxPacketSize int
@@ -71,11 +73,25 @@ func (c *CompressionState) ReadFrame(r *bufio.Reader) ([]byte, error) {
 		return nil, ErrInvalidCompressedPacket
 	}
 
-	zr, err := zlib.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidCompressedPacket, err)
+	reader := bytes.NewReader(data)
+	var zr io.ReadCloser
+	if pooled := compressionReaderPool.Get(); pooled != nil {
+		zr = pooled.(io.ReadCloser)
+		if err := zr.(zlib.Resetter).Reset(reader, nil); err != nil {
+			_ = zr.Close()
+			return nil, fmt.Errorf("%w: %v", ErrInvalidCompressedPacket, err)
+		}
+	} else {
+		var err error
+		zr, err = zlib.NewReader(reader)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidCompressedPacket, err)
+		}
 	}
-	defer zr.Close()
+	defer func() {
+		_ = zr.Close()
+		compressionReaderPool.Put(zr)
+	}()
 	payload := make([]byte, int(dataLength))
 	if _, err := io.ReadFull(zr, payload); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidCompressedPacket, err)
