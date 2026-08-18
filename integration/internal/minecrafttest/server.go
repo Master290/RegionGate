@@ -39,7 +39,7 @@ func Start(t *testing.T, options Options) *Server {
 		cancel: cancel,
 	}
 	args := []string{
-		"run", "--rm", "--detach", "--name", server.name,
+		"run", "--detach", "--name", server.name,
 		"--publish", "127.0.0.1::25565",
 		"--env", "EULA=TRUE",
 		"--env", "TYPE=" + options.Type,
