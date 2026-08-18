@@ -49,6 +49,13 @@ func Start(t *testing.T, options Options) *Server {
 		"--env", "ENABLE_RCON=FALSE",
 		"--env", "MEMORY=1G",
 	}
+	if jar := os.Getenv("REGIONGATE_PAPER_JAR"); jar != "" && strings.EqualFold(options.Type, "PAPER") {
+		args = append(args,
+			"--volume", jar+":/data/paper.jar:ro",
+			"--env", "TYPE=CUSTOM",
+			"--env", "CUSTOM_SERVER=/data/paper.jar",
+		)
+	}
 	for key, value := range options.ExtraEnvironment {
 		args = append(args, "--env", key+"="+value)
 	}

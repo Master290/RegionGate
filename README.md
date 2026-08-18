@@ -159,6 +159,10 @@ Run the real Paper 1.20.4 Velocity forwarding integration test with Docker:
 REGIONGATE_RUN_PAPER_INTEGRATION=1 go test -tags=integration ./integration/paper -v
 ```
 
+To run the Paper integration test without downloading from PaperMC, set
+`REGIONGATE_PAPER_JAR` to a local 1.20.4 Paper jar. The harness mounts it into
+the temporary container and switches the image to `CUSTOM` mode.
+
 The test starts an ephemeral Paper container and verifies both a successful
 forwarding login and rejection of an invalid Velocity secret.
 
