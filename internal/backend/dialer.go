@@ -15,8 +15,6 @@ type Config struct {
 	Address        string
 	Host           string
 	Port           uint16
-	Username       string
-	UUID           [16]byte
 	MaxPacketSize  int
 	ConnectTimeout time.Duration
 }
@@ -35,7 +33,7 @@ func NewDialer(config Config) *Dialer {
 
 // Dial creates and initializes a backend-only transport. The caller owns the
 // returned connection and continues the login plugin/configuration exchange.
-func (d *Dialer) Dial(ctx context.Context) (*transport.Transport, error) {
+func (d *Dialer) Dial(ctx context.Context, username string, uid [16]byte) (*transport.Transport, error) {
 	if d.config.Address == "" {
 		err := fmt.Errorf("backend address is empty")
 		d.health.set(HealthUnhealthy, err)
@@ -62,7 +60,7 @@ func (d *Dialer) Dial(ctx context.Context) (*transport.Transport, error) {
 		d.health.set(HealthUnhealthy, err)
 		return nil, err
 	}
-	if err := t.WriteFrame(login.StartPayload(d.config.Username, d.config.UUID)); err != nil {
+	if err := t.WriteFrame(login.StartPayload(username, uid)); err != nil {
 		_ = t.Close()
 		err = fmt.Errorf("write backend login start: %w", err)
 		d.health.set(HealthUnhealthy, err)

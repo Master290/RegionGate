@@ -53,8 +53,8 @@ func TestDialerWritesIndependentHandshakeAndLoginStart(t *testing.T) {
 		serverDone <- nil
 	}()
 
-	dialer := NewDialer(Config{Address: listener.Addr().String(), Host: "localhost", Port: 25565, Username: "Daniar", UUID: uid})
-	client, err := dialer.Dial(context.Background())
+	dialer := NewDialer(Config{Address: listener.Addr().String(), Host: "localhost", Port: 25565})
+	client, err := dialer.Dial(context.Background(), "Daniar", uid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestDialerWritesIndependentHandshakeAndLoginStart(t *testing.T) {
 
 func TestDialerMarksInvalidConfigurationUnhealthy(t *testing.T) {
 	dialer := NewDialer(Config{})
-	if _, err := dialer.Dial(context.Background()); err == nil {
+	if _, err := dialer.Dial(context.Background(), "Daniar", [16]byte{}); err == nil {
 		t.Fatal("expected empty address error")
 	}
 	health := dialer.Health()
