@@ -59,7 +59,7 @@ func CompleteConfiguration(ctx context.Context, backend *transport.Transport, co
 			if configCtx.Err() != nil {
 				return ConfigurationResult{}, configCtx.Err()
 			}
-			return ConfigurationResult{}, fmt.Errorf("read backend configuration packet: %w", err)
+			return ConfigurationResult{}, fmt.Errorf("%w: %v", ErrBackendConfigurationDisconnected, err)
 		}
 		id, body, err := codec.PacketID(frame)
 		if err != nil {

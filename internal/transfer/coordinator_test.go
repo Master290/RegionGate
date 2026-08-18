@@ -7,12 +7,76 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/backend"
 	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
+	"github.com/Master290/RegionGate/internal/protocol/login"
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/session"
 	"github.com/Master290/RegionGate/internal/transport"
 )
+
+func TestPrepareRollsBackWhenBackendDisconnectsDuringConfiguration(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	backendDone := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			backendDone <- err
+			return
+		}
+		server := transport.New(conn, 4096)
+		defer server.Close()
+		if _, err := server.ReadFrame(); err != nil {
+			backendDone <- err
+			return
+		}
+		if _, err := server.ReadFrame(); err != nil {
+			backendDone <- err
+			return
+		}
+		if err := server.WriteFrame(login.SuccessPayload("Daniar")); err != nil {
+			backendDone <- err
+			return
+		}
+		ack, err := server.ReadFrame()
+		if err == nil {
+			err = login.ParseAcknowledged(ack)
+		}
+		backendDone <- err
+	}()
+
+	state := session.New()
+	for _, next := range []session.State{session.StateLogin, session.StateConfiguration, session.StateLimboPlay} {
+		if err := state.Transition(next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forwarder, err := forwarding.NewModernForwarding([]byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := backend.NewDialer(backend.Config{Address: listener.Addr().String(), Host: "localhost", Port: 25565})
+	coordinator := NewCoordinator(dialer, forwarder, Config{
+		Login:         backend.LoginConfig{Timeout: time.Second},
+		Configuration: backend.ConfigurationConfig{Timeout: time.Second},
+	})
+	identity := forwarding.PlayerIdentity{Username: "Daniar", UUID: login.OfflineUUID("Daniar")}
+	_, err = coordinator.Prepare(context.Background(), state, identity, nil)
+	if !errors.Is(err, backend.ErrBackendConfigurationDisconnected) {
+		t.Fatalf("error=%v", err)
+	}
+	if state.State() != session.StateLimboPlay {
+		t.Fatalf("state=%s", state.State())
+	}
+	if err := <-backendDone; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestPrepareRejectsUnconfiguredCoordinatorWithoutMutatingSession(t *testing.T) {
 	state := session.New()

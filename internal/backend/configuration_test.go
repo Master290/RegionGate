@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -10,6 +11,40 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/transport"
 )
+
+func TestCompleteConfigurationClassifiesTransportDisconnect(t *testing.T) {
+	proxyConn, serverConn := net.Pipe()
+	proxy := transport.New(proxyConn, 1024)
+	_ = serverConn.Close()
+	defer proxy.Close()
+	_, err := CompleteConfiguration(context.Background(), proxy, ConfigurationConfig{Timeout: time.Second})
+	if !errors.Is(err, ErrBackendConfigurationDisconnected) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestCompleteConfigurationEnforcesBufferBounds(t *testing.T) {
+	proxyConn, serverConn := net.Pipe()
+	proxy := transport.New(proxyConn, 1024)
+	server := transport.New(serverConn, 1024)
+	defer proxy.Close()
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() {
+		if err := server.WriteFrame(append(codec.AppendVarInt(nil, 0x05), 1, 2)); err != nil {
+			done <- err
+			return
+		}
+		done <- server.WriteFrame(append(codec.AppendVarInt(nil, 0x06), 3, 4))
+	}()
+	_, err := CompleteConfiguration(context.Background(), proxy, ConfigurationConfig{Timeout: time.Second, MaxPackets: 1, MaxBytes: 32})
+	if !errors.Is(err, ErrBackendConfigurationTooLarge) {
+		t.Fatalf("error=%v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCompleteConfigurationHandlesKeepAliveAndFinishes(t *testing.T) {
 	proxyConn, serverConn := net.Pipe()
