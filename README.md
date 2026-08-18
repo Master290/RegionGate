@@ -150,6 +150,14 @@ REGIONGATE_RUN_PAPER_INTEGRATION=1 go test -tags=integration ./integration/paper
 The test starts an ephemeral Paper container and verifies both a successful
 forwarding login and rejection of an invalid Velocity secret.
 
+Run the FabricProxy-Lite integration test:
+
+```bash
+REGIONGATE_RUN_FABRIC_INTEGRATION=1 go test -tags=integration ./integration/fabric -v
+```
+
+It uses Fabric 1.20.4 and FabricProxy-Lite 2.7.0 from Modrinth.
+
 ## Running
 
 Start the Minecraft listener and health endpoint:

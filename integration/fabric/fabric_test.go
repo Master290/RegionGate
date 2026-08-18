@@ -1,6 +1,6 @@
 //go:build integration
 
-package paper_test
+package fabric_test
 
 import (
 	"context"
@@ -15,50 +15,51 @@ import (
 	"github.com/Master290/RegionGate/internal/transport"
 )
 
-func TestPaperVelocityForwarding(t *testing.T) {
-	if os.Getenv("REGIONGATE_RUN_PAPER_INTEGRATION") != "1" {
-		t.Skip("set REGIONGATE_RUN_PAPER_INTEGRATION=1 to run the Paper integration test")
+func TestFabricProxyLiteVelocityForwarding(t *testing.T) {
+	if os.Getenv("REGIONGATE_RUN_FABRIC_INTEGRATION") != "1" {
+		t.Skip("set REGIONGATE_RUN_FABRIC_INTEGRATION=1 to run the FabricProxy-Lite integration test")
 	}
-	secret := "regiongate-paper-integration-secret"
+	secret := "regiongate-fabric-integration-secret"
 	server := minecrafttest.Start(t, minecrafttest.Options{
-		Type:    "PAPER",
+		Type:    "FABRIC",
 		Version: "1.20.4",
 		ExtraEnvironment: map[string]string{
-			"VELOCITY_SECRET": secret,
+			"MODRINTH_PROJECTS":   "fabricproxy-lite:2.7.0",
+			"FABRIC_PROXY_SECRET": secret,
 		},
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	t.Run("valid secret reaches configuration", func(t *testing.T) {
-		identity := forwarding.PlayerIdentity{Address: "203.0.113.10", UUID: login.OfflineUUID("RegionGateValid"), Username: "RegionGateValid"}
-		connection := dialPaper(t, ctx, server.Address(), identity)
+		identity := forwarding.PlayerIdentity{Address: "203.0.113.20", UUID: login.OfflineUUID("RGFabricValid"), Username: "RGFabricValid"}
+		connection := dialFabric(t, ctx, server.Address(), identity)
 		defer connection.Close()
 		forwarder, _ := forwarding.NewModernForwarding([]byte(secret))
 		if _, err := backend.CompleteLogin(ctx, connection, forwarder, identity, backend.LoginConfig{Timeout: 30 * time.Second}); err != nil {
-			t.Fatalf("Paper login failed: %v\n%s", err, server.Logs())
+			t.Fatalf("FabricProxy-Lite login failed: %v\n%s", err, server.Logs())
 		}
 		configuration, err := backend.CompleteConfiguration(ctx, connection, backend.ConfigurationConfig{Timeout: 30 * time.Second})
 		if err != nil {
-			t.Fatalf("Paper configuration failed: %v\n%s", err, server.Logs())
+			t.Fatalf("Fabric configuration failed: %v\n%s", err, server.Logs())
 		}
 		if len(configuration.Packets) == 0 {
-			t.Fatal("Paper returned no configuration packets")
+			t.Fatal("Fabric returned no configuration packets")
 		}
 	})
 
 	t.Run("wrong secret is rejected", func(t *testing.T) {
-		identity := forwarding.PlayerIdentity{Address: "203.0.113.11", UUID: login.OfflineUUID("RegionGateInvalid"), Username: "RegionGateInvalid"}
-		connection := dialPaper(t, ctx, server.Address(), identity)
+		identity := forwarding.PlayerIdentity{Address: "203.0.113.21", UUID: login.OfflineUUID("RGFabricBad"), Username: "RGFabricBad"}
+		connection := dialFabric(t, ctx, server.Address(), identity)
 		defer connection.Close()
 		forwarder, _ := forwarding.NewModernForwarding([]byte("wrong-secret"))
 		if _, err := backend.CompleteLogin(ctx, connection, forwarder, identity, backend.LoginConfig{Timeout: 30 * time.Second}); err == nil {
-			t.Fatal("Paper accepted an invalid Velocity forwarding secret")
+			t.Fatal("FabricProxy-Lite accepted an invalid Velocity forwarding secret")
 		}
 	})
 }
 
-func dialPaper(t *testing.T, ctx context.Context, address string, identity forwarding.PlayerIdentity) *transport.Transport {
+func dialFabric(t *testing.T, ctx context.Context, address string, identity forwarding.PlayerIdentity) *transport.Transport {
 	t.Helper()
 	dialer := backend.NewDialer(backend.Config{Address: address, Host: "localhost", Port: 25565, ConnectTimeout: 10 * time.Second})
 	connection, err := dialer.Dial(ctx, identity.Username, identity.UUID)
