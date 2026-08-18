@@ -158,6 +158,12 @@ REGIONGATE_RUN_FABRIC_INTEGRATION=1 go test -tags=integration ./integration/fabr
 
 It uses Fabric 1.20.4 and FabricProxy-Lite 2.7.0 from Modrinth.
 
+Run the performance baseline with allocation counts:
+
+```bash
+go test ./internal/protocol/codec ./internal/transport ./internal/session -run '^$' -bench . -benchmem
+```
+
 ## Running
 
 Start the Minecraft listener and health endpoint:

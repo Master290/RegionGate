@@ -7,12 +7,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 )
 
 var (
 	ErrInvalidCompressionThreshold = errors.New("invalid compression threshold")
 	ErrInvalidCompressedPacket     = errors.New("invalid compressed packet")
 )
+
+var compressionWriterPool = sync.Pool{
+	New: func() any {
+		writer, err := zlib.NewWriterLevel(io.Discard, zlib.DefaultCompression)
+		if err != nil {
+			panic(err)
+		}
+		return writer
+	},
+}
 
 type CompressionState struct {
 	threshold     int
@@ -90,14 +101,18 @@ func (c *CompressionState) WriteFrame(w io.Writer, payload []byte) error {
 	}
 
 	var compressed bytes.Buffer
-	zw := zlib.NewWriter(&compressed)
+	zw := compressionWriterPool.Get().(*zlib.Writer)
+	zw.Reset(&compressed)
 	if _, err := zw.Write(payload); err != nil {
 		_ = zw.Close()
+		compressionWriterPool.Put(zw)
 		return err
 	}
 	if err := zw.Close(); err != nil {
+		compressionWriterPool.Put(zw)
 		return err
 	}
+	compressionWriterPool.Put(zw)
 	wire := AppendVarInt(nil, int32(len(payload)))
 	wire = append(wire, compressed.Bytes()...)
 	return c.wireFramer.WriteFrame(w, wire)
