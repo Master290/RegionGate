@@ -594,6 +594,26 @@ func TestServerAdmissionTransfersClientToBackendPlay(t *testing.T) {
 	<-serveDone
 }
 
+func TestPrepareTransferCancelsWithLimboSession(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	prepareTransfer(sessionCtx, context.Background(), func(ctx context.Context) (*transfer.Prepared, error) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return nil, ctx.Err()
+	})
+
+	<-started
+	cancelSession()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("backend preparation was not canceled with the Limbo session")
+	}
+}
+
 func handshakePayload(next handshake.NextState) []byte {
 	payload := codec.AppendVarInt(nil, 0x00)
 	payload = codec.AppendVarInt(payload, handshake.ProtocolVersion)

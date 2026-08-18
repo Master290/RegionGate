@@ -413,12 +413,10 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 				continue
 			}
 			activeAdmission = request
-			prepareResultChannel := make(chan prepareOutcome, 1)
-			prepareResult = prepareResultChannel
-			go func() {
-				result, err := s.config.TransferCoordinator.Prepare(request.ctx, state, identity, pendingIDs(pendingKeepAlive))
-				prepareResultChannel <- prepareOutcome{prepared: result, err: err}
-			}()
+			oldKeepAlives := pendingIDs(pendingKeepAlive)
+			prepareResult = prepareTransfer(queueCtx, request.ctx, func(ctx context.Context) (*transfer.Prepared, error) {
+				return s.config.TransferCoordinator.Prepare(ctx, state, identity, oldKeepAlives)
+			})
 		case result := <-prepareResult:
 			prepareResult = nil
 			if result.err != nil {
@@ -528,6 +526,28 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 			}
 		}
 	}
+}
+
+func prepareTransfer(sessionCtx, requestCtx context.Context, prepare func(context.Context) (*transfer.Prepared, error)) <-chan prepareOutcome {
+	resultChannel := make(chan prepareOutcome)
+	go func() {
+		ctx, cancel := context.WithCancel(requestCtx)
+		stopSessionCancel := context.AfterFunc(sessionCtx, cancel)
+		defer func() {
+			stopSessionCancel()
+			cancel()
+		}()
+
+		prepared, err := prepare(ctx)
+		select {
+		case resultChannel <- prepareOutcome{prepared: prepared, err: err}:
+		case <-ctx.Done():
+			if prepared != nil {
+				_ = prepared.Rollback()
+			}
+		}
+	}()
+	return resultChannel
 }
 
 func handleBarrierFrame(state *session.Session, id int32, frame []byte) error {
