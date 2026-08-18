@@ -141,6 +141,12 @@ Run the race detector in an environment with CGO enabled:
 CGO_ENABLED=1 go test -race ./...
 ```
 
+On Windows, run the same check in the pinned Linux toolchain container:
+
+```powershell
+docker run --rm --volume "${PWD}:/src" --workdir /src golang:1.26 go test -race ./...
+```
+
 Run the real Paper 1.20.4 Velocity forwarding integration test with Docker:
 
 ```bash
