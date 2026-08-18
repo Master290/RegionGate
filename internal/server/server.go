@@ -84,6 +84,8 @@ type prepareOutcome struct {
 	err      error
 }
 
+const maxClientConfigurationSetupPackets = 16
+
 func New(config Config, logger *slog.Logger) *Server {
 	if config.MaxConnections <= 0 {
 		config.MaxConnections = 10000
@@ -244,8 +246,7 @@ func (s *Server) serveLogin(client *transport.Transport) {
 	if err := s.writeFrame(client, configuration.FinishPayload()); err != nil {
 		return
 	}
-	frame, err = client.ReadFrame()
-	if err != nil || configuration.ParseFinishAcknowledged(frame) != nil {
+	if err := readClientConfiguration(client); err != nil {
 		return
 	}
 	if err := state.Transition(session.StateLimboPlay); err != nil {
@@ -255,6 +256,26 @@ func (s *Server) serveLogin(client *transport.Transport) {
 		return
 	}
 	s.logger.Debug("offline login completed", "remote", conn.RemoteAddr(), "username", start.Username)
+}
+
+func readClientConfiguration(client *transport.Transport) error {
+	for range maxClientConfigurationSetupPackets + 1 {
+		frame, err := client.ReadFrame()
+		if err != nil {
+			return err
+		}
+		id, _, err := codec.PacketID(frame)
+		if err != nil {
+			return configuration.ErrMalformed
+		}
+		if id == configuration.ServerboundFinishConfigurationID {
+			return configuration.ParseFinishAcknowledged(frame)
+		}
+		if err := configuration.ParseClientSetup(frame); err != nil {
+			return err
+		}
+	}
+	return configuration.ErrMalformed
 }
 
 func (s *Server) serveLimbo(client *transport.Transport, state *session.Session, username string) error {
@@ -566,6 +587,9 @@ func handleBarrierFrame(state *session.Session, id int32, frame []byte) error {
 			return err
 		}
 		return state.AdvanceBarrier(session.BarrierReady)
+	}
+	if phase == session.BarrierAwaitingClientConfigurationFinish && (id == configuration.ServerboundClientInformationID || id == configuration.ServerboundPluginMessageID) {
+		return configuration.ParseClientSetup(frame)
 	}
 	if id == play.ServerboundConfigurationAcknowledgedID || id == configuration.ServerboundFinishConfigurationID {
 		return play.ErrMalformed

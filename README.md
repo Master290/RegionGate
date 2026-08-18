@@ -44,6 +44,7 @@ Implemented:
 - Offline-mode Login Start and Login Success.
 - Offline UUID generation compatible with `OfflinePlayer:<username>`.
 - Minecraft 1.20.4 Configuration state.
+- Client Information and Configuration plugin-message validation.
 - Anonymous NBT encoder and minimal registry data.
 - Limbo Join Game initialization.
 - One void chunk with 24 empty overworld sections.
@@ -73,7 +74,6 @@ Planned:
 
 - Validation with a real vanilla Minecraft 1.20.4 client.
 - Long-running Limbo worker and periodic KeepAlive scheduling.
-- Client settings and additional Configuration packets.
 - Online-mode RSA encryption and Mojang session validation.
 - Metrics and administrative API.
 

@@ -296,6 +296,9 @@ func TestBarrierFrameRejectsDuplicateConfigurationAcknowledgement(t *testing.T) 
 	if err := state.AdvanceBarrier(session.BarrierAwaitingClientConfigurationFinish); err != nil {
 		t.Fatal(err)
 	}
+	if err := handleBarrierFrame(state, configuration.ServerboundClientInformationID, clientInformationPayload()); err != nil {
+		t.Fatalf("client information during barrier: %v", err)
+	}
 	finish := configuration.FinishAcknowledgedPayload()
 	if err := handleBarrierFrame(state, configuration.ServerboundFinishConfigurationID, finish); err != nil {
 		t.Fatal(err)
@@ -360,6 +363,15 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 		t.Fatalf("finish id=%d body=%x err=%v", finishID, finishBody, err)
 	}
 
+	if err := framer.WriteFrame(clientConn, clientInformationPayload()); err != nil {
+		t.Fatal(err)
+	}
+	brand := codec.AppendVarInt(nil, configuration.ServerboundPluginMessageID)
+	brand = codec.AppendString(brand, "minecraft:brand")
+	brand = codec.AppendString(brand, "vanilla")
+	if err := framer.WriteFrame(clientConn, brand); err != nil {
+		t.Fatal(err)
+	}
 	if err := framer.WriteFrame(clientConn, codec.AppendVarInt(nil, configuration.ServerboundFinishConfigurationID)); err != nil {
 		t.Fatal(err)
 	}
@@ -627,6 +639,16 @@ func pingPayload(value int64) []byte {
 	var raw [8]byte
 	binary.BigEndian.PutUint64(raw[:], uint64(value))
 	return append(payload, raw[:]...)
+}
+
+func clientInformationPayload() []byte {
+	payload := codec.AppendVarInt(nil, configuration.ServerboundClientInformationID)
+	payload = codec.AppendString(payload, "en_us")
+	payload = append(payload, 12)
+	payload = codec.AppendVarInt(payload, 0)
+	payload = append(payload, 1, 0x7f)
+	payload = codec.AppendVarInt(payload, 1)
+	return append(payload, 0, 1)
 }
 
 type remoteAddrConn struct {
