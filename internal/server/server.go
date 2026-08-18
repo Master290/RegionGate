@@ -19,6 +19,7 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 	admissionqueue "github.com/Master290/RegionGate/internal/queue"
+	"github.com/Master290/RegionGate/internal/ratelimit"
 	"github.com/Master290/RegionGate/internal/session"
 	"github.com/Master290/RegionGate/internal/transfer"
 	"github.com/Master290/RegionGate/internal/transport"
@@ -38,6 +39,8 @@ type Config struct {
 	TransferCoordinator *transfer.Coordinator
 	AdmissionQueue      *admissionqueue.FIFO
 	QueueStatusInterval time.Duration
+	LoginRateLimit      int
+	LoginRateWindow     time.Duration
 }
 
 type Server struct {
@@ -50,6 +53,7 @@ type Server struct {
 	clients       map[net.Conn]*transport.Transport
 	admissions    map[net.Conn]chan admissionRequest
 	ipConnections map[string]int
+	loginLimiter  *ratelimit.Limiter
 }
 
 type admissionRequest struct {
@@ -93,10 +97,16 @@ func New(config Config, logger *slog.Logger) *Server {
 	if config.QueueStatusInterval <= 0 {
 		config.QueueStatusInterval = time.Second
 	}
+	if config.LoginRateLimit <= 0 {
+		config.LoginRateLimit = 10
+	}
+	if config.LoginRateWindow <= 0 {
+		config.LoginRateWindow = 10 * time.Second
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport), admissions: make(map[net.Conn]chan admissionRequest), ipConnections: make(map[string]int)}
+	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport), admissions: make(map[net.Conn]chan admissionRequest), ipConnections: make(map[string]int), loginLimiter: ratelimit.New(config.LoginRateLimit, config.LoginRateWindow)}
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
@@ -169,6 +179,10 @@ func (s *Server) serveConn(conn net.Conn) {
 	case handshake.NextStatus:
 		s.serveStatus(client)
 	case handshake.NextLogin:
+		if !s.loginLimiter.Allow(remoteHost(conn.RemoteAddr()), time.Now()) {
+			s.logger.Warn("login rate limit exceeded", "remote", conn.RemoteAddr())
+			return
+		}
 		s.serveLogin(client)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Master290/RegionGate/internal/server"
 )
@@ -19,6 +20,25 @@ func TestLoadConfigDefaultsAndBackendValidation(t *testing.T) {
 	values := map[string]string{"REGIONGATE_BACKEND_ADDRESS": "127.0.0.1:25566"}
 	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
 		t.Fatal("expected incomplete backend configuration error")
+	}
+}
+
+func TestLoadConfigLoginRateLimit(t *testing.T) {
+	values := map[string]string{
+		"REGIONGATE_LOGIN_RATE_LIMIT":  "25",
+		"REGIONGATE_LOGIN_RATE_WINDOW": "30s",
+	}
+	config, err := loadConfig(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.LoginRateLimit != 25 || config.LoginRateWindow != 30*time.Second {
+		t.Fatalf("login rate config=%+v", config)
+	}
+
+	values["REGIONGATE_LOGIN_RATE_WINDOW"] = "invalid"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("expected invalid login rate window error")
 	}
 }
 

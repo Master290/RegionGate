@@ -143,6 +143,66 @@ func TestServerHandshakeTimeoutClosesSilentConnection(t *testing.T) {
 	}
 }
 
+func TestServerLoginRateLimitDoesNotAffectStatus(t *testing.T) {
+	s := New(Config{
+		LoginRateLimit:  1,
+		LoginRateWindow: time.Minute,
+		Status: status.Response{
+			Version:     status.Version{Name: "1.20.4", Protocol: 765},
+			Players:     status.Players{Max: 100},
+			Description: status.Description{Text: "RegionGate"},
+		},
+	}, nil)
+	remote := &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 40000}
+
+	firstServer, firstClient := net.Pipe()
+	firstDone := make(chan struct{})
+	go func() {
+		s.serveConn(remoteAddrConn{Conn: firstServer, remote: remote})
+		close(firstDone)
+	}()
+	framer := codec.NewFramer(1024)
+	if err := framer.WriteFrame(firstClient, handshakePayload(handshake.NextLogin)); err != nil {
+		t.Fatal(err)
+	}
+	_ = firstClient.Close()
+	<-firstDone
+
+	secondServer, secondClient := net.Pipe()
+	secondDone := make(chan struct{})
+	go func() {
+		s.serveConn(remoteAddrConn{Conn: secondServer, remote: remote})
+		close(secondDone)
+	}()
+	if err := framer.WriteFrame(secondClient, handshakePayload(handshake.NextLogin)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("rate-limited login connection was not closed")
+	}
+	_ = secondClient.Close()
+
+	statusServer, statusClient := net.Pipe()
+	statusDone := make(chan struct{})
+	go func() {
+		s.serveConn(remoteAddrConn{Conn: statusServer, remote: remote})
+		close(statusDone)
+	}()
+	if err := framer.WriteFrame(statusClient, handshakePayload(handshake.NextStatus)); err != nil {
+		t.Fatal(err)
+	}
+	if err := framer.WriteFrame(statusClient, codec.AppendVarInt(nil, 0x00)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := framer.ReadFrame(bufio.NewReader(statusClient), nil); err != nil {
+		t.Fatalf("status request was affected by login rate limit: %v", err)
+	}
+	_ = statusClient.Close()
+	<-statusDone
+}
+
 func TestServerRegistersClientTransportForConnectionLifetime(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	s := New(Config{HandshakeTimeout: time.Second}, nil)
@@ -506,3 +566,10 @@ func pingPayload(value int64) []byte {
 	binary.BigEndian.PutUint64(raw[:], uint64(value))
 	return append(payload, raw[:]...)
 }
+
+type remoteAddrConn struct {
+	net.Conn
+	remote net.Addr
+}
+
+func (c remoteAddrConn) RemoteAddr() net.Addr { return c.remote }

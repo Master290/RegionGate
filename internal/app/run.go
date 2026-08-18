@@ -34,6 +34,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	gateway := server.New(server.Config{
 		MaxConnections: config.MaxConnections, MaxConnectionsPerIP: config.MaxConnectionsPerIP, MaxPacketSize: config.MaxPacketSize,
 		KeepAliveInterval: config.KeepAliveInterval, KeepAliveTimeout: config.KeepAliveTimeout,
+		LoginRateLimit: config.LoginRateLimit, LoginRateWindow: config.LoginRateWindow,
 		TransferCoordinator: coordinator,
 		AdmissionQueue:      fifo,
 		Status: status.Response{

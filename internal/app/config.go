@@ -21,6 +21,8 @@ type Config struct {
 	KeepAliveTimeout    time.Duration
 	QueueSize           int
 	AdmissionInterval   time.Duration
+	LoginRateLimit      int
+	LoginRateWindow     time.Duration
 }
 
 func LoadConfig() (Config, error) { return loadConfig(os.Getenv) }
@@ -39,6 +41,8 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		KeepAliveTimeout:    30 * time.Second,
 		QueueSize:           1024,
 		AdmissionInterval:   time.Second,
+		LoginRateLimit:      10,
+		LoginRateWindow:     10 * time.Second,
 	}
 	var err error
 	if config.BackendPort, err = uint16Value(getenv("REGIONGATE_BACKEND_PORT"), config.BackendPort); err != nil {
@@ -57,6 +61,15 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		config.AdmissionInterval, err = time.ParseDuration(value)
 		if err != nil || config.AdmissionInterval <= 0 {
 			return Config{}, errors.New("REGIONGATE_ADMISSION_INTERVAL must be a positive duration")
+		}
+	}
+	if config.LoginRateLimit, err = intValue(getenv("REGIONGATE_LOGIN_RATE_LIMIT"), config.LoginRateLimit); err != nil || config.LoginRateLimit <= 0 {
+		return Config{}, errors.New("REGIONGATE_LOGIN_RATE_LIMIT must be positive")
+	}
+	if value := getenv("REGIONGATE_LOGIN_RATE_WINDOW"); value != "" {
+		config.LoginRateWindow, err = time.ParseDuration(value)
+		if err != nil || config.LoginRateWindow <= 0 {
+			return Config{}, errors.New("REGIONGATE_LOGIN_RATE_WINDOW must be a positive duration")
 		}
 	}
 	if (config.BackendAddress == "") != (config.VelocitySecret == "") {
