@@ -70,6 +70,7 @@ Implemented:
 - Allocation and throughput benchmarks with zlib pooling.
 - Opt-in pprof endpoint with graceful shutdown.
 - Read-only Prometheus metrics and admin status endpoints.
+- Backend protocol health state after Login and Configuration.
 
 Planned:
 

@@ -73,6 +73,9 @@ func TestPrepareRollsBackWhenBackendDisconnectsDuringConfiguration(t *testing.T)
 	if state.State() != session.StateLimboPlay {
 		t.Fatalf("state=%s", state.State())
 	}
+	if health := dialer.Health(); health.State != backend.HealthUnhealthy || health.LastError == "" {
+		t.Fatalf("health=%+v", health)
+	}
 	if err := <-backendDone; err != nil {
 		t.Fatal(err)
 	}

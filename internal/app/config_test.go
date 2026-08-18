@@ -118,7 +118,7 @@ func TestMetricsAndAdminStatusExposeGatewaySnapshot(t *testing.T) {
 	gateway := server.New(server.Config{}, nil)
 	metricsResponse := httptest.NewRecorder()
 	metricsHandler(gateway).ServeHTTP(metricsResponse, httptest.NewRequest("GET", "/metrics", nil))
-	if metricsResponse.Code != 200 || !strings.Contains(metricsResponse.Body.String(), "regiongate_sessions_active 0\n") {
+	if metricsResponse.Code != 200 || !strings.Contains(metricsResponse.Body.String(), "regiongate_sessions_active 0\n") || !strings.Contains(metricsResponse.Body.String(), "regiongate_backend_health_state 0\n") {
 		t.Fatalf("metrics status=%d body=%q", metricsResponse.Code, metricsResponse.Body.String())
 	}
 	if got := metricsResponse.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {

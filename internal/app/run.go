@@ -157,6 +157,7 @@ func metricsHandler(gateway *server.Server) http.Handler {
 			{"regiongate_connections_rejected_capacity_total", metrics.RejectedCapacity},
 			{"regiongate_connections_rejected_ip_total", metrics.RejectedPerIP},
 			{"regiongate_login_rate_limited_total", metrics.LoginRateLimited},
+			{"regiongate_backend_health_state", metrics.BackendHealthState},
 		}
 		for _, metric := range values {
 			_, _ = response.Write([]byte(metric.name + " " + strconv.FormatUint(metric.value, 10) + "\n"))

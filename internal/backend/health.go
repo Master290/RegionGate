@@ -33,10 +33,12 @@ func (h *healthState) get() HealthSnapshot {
 func (h *healthState) set(state HealthState, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.snapshot.State = state
-	h.snapshot.ChangedAt = time.Now()
-	h.snapshot.LastError = ""
+	lastError := ""
 	if err != nil {
-		h.snapshot.LastError = err.Error()
+		lastError = err.Error()
 	}
+	if h.snapshot.State == state && h.snapshot.LastError == lastError {
+		return
+	}
+	h.snapshot = HealthSnapshot{State: state, ChangedAt: time.Now(), LastError: lastError}
 }

@@ -46,6 +46,13 @@ func NewCoordinator(dialer *backend.Dialer, forwarder *forwarding.ModernForwardi
 	return &Coordinator{dialer: dialer, forwarder: forwarder, config: config}
 }
 
+func (c *Coordinator) BackendHealth() backend.HealthSnapshot {
+	if c == nil || c.dialer == nil {
+		return backend.HealthSnapshot{State: backend.HealthUnknown}
+	}
+	return c.dialer.Health()
+}
+
 // Prepare establishes the backend through the barrier up to the point where
 // the client must acknowledge its configuration transition.
 func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, identity forwarding.PlayerIdentity, oldKeepAlives []int64) (*Prepared, error) {
@@ -73,6 +80,9 @@ func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, ident
 		return rollback(err, nil)
 	}
 	if _, err := backend.CompleteLogin(ctx, backendConn, c.forwarder, identity, c.config.Login); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			c.dialer.MarkUnhealthy(err)
+		}
 		return rollback(err, backendConn)
 	}
 	if err := state.AdvanceBarrier(session.BarrierBackendConfiguration); err != nil {
@@ -80,8 +90,12 @@ func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, ident
 	}
 	configuration, err := backend.CompleteConfiguration(ctx, backendConn, c.config.Configuration)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			c.dialer.MarkUnhealthy(err)
+		}
 		return rollback(err, backendConn)
 	}
+	c.dialer.MarkHealthy()
 	if err := state.AdvanceBarrier(session.BarrierAwaitingClientConfigurationStart); err != nil {
 		return rollback(err, backendConn)
 	}

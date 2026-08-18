@@ -606,6 +606,9 @@ func TestServerAdmissionTransfersClientToBackendPlay(t *testing.T) {
 	if err := <-backendDone; err != nil {
 		t.Fatal(err)
 	}
+	if health := dialer.Health(); health.State != backend.HealthHealthy || health.ChangedAt.IsZero() || health.LastError != "" {
+		t.Fatalf("health=%+v", health)
+	}
 	_ = client.Close()
 	<-serveDone
 }

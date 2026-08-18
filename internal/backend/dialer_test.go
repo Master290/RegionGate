@@ -62,7 +62,7 @@ func TestDialerWritesIndependentHandshakeAndLoginStart(t *testing.T) {
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
 	}
-	if health := dialer.Health(); health.State != HealthHealthy || health.ChangedAt.IsZero() {
+	if health := dialer.Health(); health.State != HealthUnknown || !health.ChangedAt.IsZero() {
 		t.Fatalf("health=%+v", health)
 	}
 }

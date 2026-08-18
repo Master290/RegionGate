@@ -67,8 +67,17 @@ func (d *Dialer) Dial(ctx context.Context, username string, uid [16]byte) (*tran
 		return nil, err
 	}
 	_ = t.SetWriteDeadline(time.Time{})
-	d.health.set(HealthHealthy, nil)
 	return t, nil
 }
 
 func (d *Dialer) Health() HealthSnapshot { return d.health.get() }
+
+// MarkHealthy records that the backend completed Login and Configuration.
+func (d *Dialer) MarkHealthy() { d.health.set(HealthHealthy, nil) }
+
+// MarkUnhealthy records a backend protocol or transport failure.
+func (d *Dialer) MarkUnhealthy(err error) {
+	if err != nil {
+		d.health.set(HealthUnhealthy, err)
+	}
+}

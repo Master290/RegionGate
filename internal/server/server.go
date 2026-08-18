@@ -67,13 +67,14 @@ type Server struct {
 }
 
 type MetricsSnapshot struct {
-	ActiveConnections uint64
-	Sessions          uint64
-	QueueLength       uint64
-	Accepted          uint64
-	RejectedCapacity  uint64
-	RejectedPerIP     uint64
-	LoginRateLimited  uint64
+	ActiveConnections  uint64
+	Sessions           uint64
+	QueueLength        uint64
+	Accepted           uint64
+	RejectedCapacity   uint64
+	RejectedPerIP      uint64
+	LoginRateLimited   uint64
+	BackendHealthState uint64
 }
 
 type admissionRequest struct {
@@ -791,18 +792,23 @@ func (s *Server) Metrics() MetricsSnapshot {
 	active := len(s.conns)
 	sessions := len(s.sessions)
 	queue := 0
+	backendHealth := uint64(0)
 	if s.config.AdmissionQueue != nil {
 		queue = s.config.AdmissionQueue.Len()
 	}
+	if s.config.TransferCoordinator != nil {
+		backendHealth = uint64(s.config.TransferCoordinator.BackendHealth().State)
+	}
 	s.mu.Unlock()
 	return MetricsSnapshot{
-		ActiveConnections: uint64(active),
-		Sessions:          uint64(sessions),
-		QueueLength:       uint64(queue),
-		Accepted:          s.accepted.Load(),
-		RejectedCapacity:  s.rejectedCap.Load(),
-		RejectedPerIP:     s.rejectedIP.Load(),
-		LoginRateLimited:  s.rateLimited.Load(),
+		ActiveConnections:  uint64(active),
+		Sessions:           uint64(sessions),
+		QueueLength:        uint64(queue),
+		Accepted:           s.accepted.Load(),
+		RejectedCapacity:   s.rejectedCap.Load(),
+		RejectedPerIP:      s.rejectedIP.Load(),
+		LoginRateLimited:   s.rateLimited.Load(),
+		BackendHealthState: backendHealth,
 	}
 }
 
