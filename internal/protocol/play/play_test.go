@@ -101,6 +101,17 @@ func TestPlayerCommandEncoding(t *testing.T) {
 	}
 }
 
+func TestActionBarPayload(t *testing.T) {
+	payload, err := ActionBarPayload("Queue position: 3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ClientboundActionBarID || len(body) < 3 || body[0] != 10 {
+		t.Fatalf("id=%d body=%x err=%v", id, body, err)
+	}
+}
+
 func TestVoidChunkPacket(t *testing.T) {
 	payload := VoidChunkPayload(0, 0)
 	id, body, err := codec.PacketID(payload)

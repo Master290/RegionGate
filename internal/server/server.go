@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/login"
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
+	admissionqueue "github.com/Master290/RegionGate/internal/queue"
 	"github.com/Master290/RegionGate/internal/session"
 	"github.com/Master290/RegionGate/internal/transfer"
 	"github.com/Master290/RegionGate/internal/transport"
@@ -34,6 +36,8 @@ type Config struct {
 	KeepAliveTimeout    time.Duration
 	Status              status.Response
 	TransferCoordinator *transfer.Coordinator
+	AdmissionQueue      *admissionqueue.FIFO
+	QueueStatusInterval time.Duration
 }
 
 type Server struct {
@@ -85,6 +89,9 @@ func New(config Config, logger *slog.Logger) *Server {
 	}
 	if config.KeepAliveTimeout <= 0 {
 		config.KeepAliveTimeout = 30 * time.Second
+	}
+	if config.QueueStatusInterval <= 0 {
+		config.QueueStatusInterval = time.Second
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -217,6 +224,14 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 	admissions := make(chan admissionRequest, 1)
 	s.trackAdmission(conn, admissions)
 	identity := forwarding.PlayerIdentity{Address: remoteHost(conn.RemoteAddr()), UUID: login.OfflineUUID(username), Username: username}
+	queueID := hex.EncodeToString(identity.UUID[:])
+	queueCtx, cancelQueue := context.WithCancel(context.Background())
+	defer cancelQueue()
+	defer func() {
+		if s.config.AdmissionQueue != nil {
+			s.config.AdmissionQueue.Cancel(queueID)
+		}
+	}()
 	join := play.JoinGamePayload(play.JoinGameConfig{
 		EntityID:           1,
 		WorldName:          "minecraft:overworld",
@@ -284,6 +299,8 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 	}
 	ticker := time.NewTicker(s.config.KeepAliveInterval)
 	defer ticker.Stop()
+	queueTicker := time.NewTicker(s.config.QueueStatusInterval)
+	defer queueTicker.Stop()
 	timeout := time.NewTimer(s.config.KeepAliveTimeout)
 	defer timeout.Stop()
 	var timeoutC <-chan time.Time = timeout.C
@@ -292,6 +309,7 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 	var prepareResult <-chan prepareOutcome
 	var activeAdmission admissionRequest
 	clientConfigurationSent := false
+	queued := false
 	var progress func() error
 	progress = func() error {
 		if prepared == nil {
@@ -391,6 +409,15 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 					return play.ErrMalformed
 				}
 				pendingKeepAlive = 0
+				if !queued && s.config.AdmissionQueue != nil && s.config.TransferCoordinator != nil {
+					if _, err := s.config.AdmissionQueue.Enqueue(admissionqueue.Item{
+						ID: queueID, Context: queueCtx,
+						Admit: func(ctx context.Context) error { return s.Admit(ctx, conn) },
+					}); err != nil {
+						return err
+					}
+					queued = true
+				}
 				if !timeout.Stop() {
 					select {
 					case <-timeout.C:
@@ -419,6 +446,18 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 			}
 		case <-timeoutC:
 			return fmt.Errorf("limbo keepalive %d timed out", pendingKeepAlive)
+		case <-queueTicker.C:
+			if queued && state.State() == session.StateLimboPlay {
+				if position, ok := s.config.AdmissionQueue.Position(queueID); ok {
+					payload, err := play.ActionBarPayload(fmt.Sprintf("Queue position: %d", position))
+					if err != nil {
+						return err
+					}
+					if err := s.writeFrame(client, payload); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 }

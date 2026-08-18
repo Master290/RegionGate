@@ -19,6 +19,8 @@ type Config struct {
 	MaxPacketSize       int
 	KeepAliveInterval   time.Duration
 	KeepAliveTimeout    time.Duration
+	QueueSize           int
+	AdmissionInterval   time.Duration
 }
 
 func LoadConfig() (Config, error) { return loadConfig(os.Getenv) }
@@ -35,6 +37,8 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		MaxConnectionsPerIP: 16,
 		KeepAliveInterval:   15 * time.Second,
 		KeepAliveTimeout:    30 * time.Second,
+		QueueSize:           1024,
+		AdmissionInterval:   time.Second,
 	}
 	var err error
 	if config.BackendPort, err = uint16Value(getenv("REGIONGATE_BACKEND_PORT"), config.BackendPort); err != nil {
@@ -45,6 +49,15 @@ func loadConfig(getenv func(string) string) (Config, error) {
 	}
 	if config.MaxConnectionsPerIP, err = intValue(getenv("REGIONGATE_MAX_CONNECTIONS_PER_IP"), config.MaxConnectionsPerIP); err != nil || config.MaxConnectionsPerIP <= 0 {
 		return Config{}, errors.New("REGIONGATE_MAX_CONNECTIONS_PER_IP must be positive")
+	}
+	if config.QueueSize, err = intValue(getenv("REGIONGATE_QUEUE_SIZE"), config.QueueSize); err != nil || config.QueueSize <= 0 {
+		return Config{}, errors.New("REGIONGATE_QUEUE_SIZE must be positive")
+	}
+	if value := getenv("REGIONGATE_ADMISSION_INTERVAL"); value != "" {
+		config.AdmissionInterval, err = time.ParseDuration(value)
+		if err != nil || config.AdmissionInterval <= 0 {
+			return Config{}, errors.New("REGIONGATE_ADMISSION_INTERVAL must be a positive duration")
+		}
 	}
 	if (config.BackendAddress == "") != (config.VelocitySecret == "") {
 		return Config{}, errors.New("backend address and Velocity secret must be configured together")

@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
+	"github.com/Master290/RegionGate/internal/protocol/configuration"
 )
 
 var ErrMalformed = errors.New("malformed play packet")
@@ -19,6 +20,7 @@ const (
 	ClientboundPositionLookID              = 0x3E
 	ClientboundSpawnPositionID             = 0x54
 	ClientboundStartConfigurationID        = 0x67
+	ClientboundActionBarID                 = 0x4A
 	ServerboundConfigurationAcknowledgedID = 0x0B
 	ServerboundTeleportConfirmID           = 0x00
 	ServerboundKeepAliveID                 = 0x15
@@ -155,6 +157,15 @@ func PositionLookPayload(x, y, z float64, yaw, pitch float32, teleportID int32) 
 
 func StartConfigurationPayload() []byte {
 	return codec.AppendVarInt(nil, ClientboundStartConfigurationID)
+}
+
+func ActionBarPayload(text string) ([]byte, error) {
+	component, err := configuration.NewCompound().String("text", text).Encode(64 << 10)
+	if err != nil {
+		return nil, err
+	}
+	payload := codec.AppendVarInt(nil, ClientboundActionBarID)
+	return append(payload, component...), nil
 }
 
 func ParseConfigurationAcknowledged(payload []byte) error {

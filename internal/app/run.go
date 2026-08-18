@@ -13,12 +13,14 @@ import (
 	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
 	"github.com/Master290/RegionGate/internal/protocol/status"
+	admissionqueue "github.com/Master290/RegionGate/internal/queue"
 	"github.com/Master290/RegionGate/internal/server"
 	"github.com/Master290/RegionGate/internal/transfer"
 )
 
 func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	var coordinator *transfer.Coordinator
+	var fifo *admissionqueue.FIFO
 	if config.BackendAddress != "" {
 		forwarder, err := forwarding.NewModernForwarding([]byte(config.VelocitySecret))
 		if err != nil {
@@ -26,18 +28,28 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		}
 		dialer := backend.NewDialer(backend.Config{Address: config.BackendAddress, Host: config.BackendHost, Port: config.BackendPort, MaxPacketSize: config.MaxPacketSize})
 		coordinator = transfer.NewCoordinator(dialer, forwarder, transfer.Config{})
+		fifo = admissionqueue.New(config.QueueSize)
 	}
 
 	gateway := server.New(server.Config{
 		MaxConnections: config.MaxConnections, MaxConnectionsPerIP: config.MaxConnectionsPerIP, MaxPacketSize: config.MaxPacketSize,
 		KeepAliveInterval: config.KeepAliveInterval, KeepAliveTimeout: config.KeepAliveTimeout,
 		TransferCoordinator: coordinator,
+		AdmissionQueue:      fifo,
 		Status: status.Response{
 			Version:     status.Version{Name: "1.20.4", Protocol: handshake.ProtocolVersion},
 			Players:     status.Players{Max: config.MaxConnections},
 			Description: status.Description{Text: "RegionGate"},
 		},
 	}, logger)
+	if fifo != nil {
+		scheduler := admissionqueue.Scheduler{Queue: fifo, Interval: config.AdmissionInterval, OnResult: func(item admissionqueue.Item, err error) {
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("queued admission failed", "id", item.ID, "error", err)
+			}
+		}}
+		go scheduler.Run(ctx)
+	}
 	listener, err := net.Listen("tcp", config.ListenAddress)
 	if err != nil {
 		return err
