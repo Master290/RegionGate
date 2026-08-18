@@ -32,11 +32,12 @@ type Config struct {
 }
 
 type Server struct {
-	config Config
-	logger *slog.Logger
-	sem    chan struct{}
-	mu     sync.Mutex
-	conns  map[net.Conn]struct{}
+	config   Config
+	logger   *slog.Logger
+	sem      chan struct{}
+	mu       sync.Mutex
+	conns    map[net.Conn]struct{}
+	sessions map[net.Conn]*session.Session
 }
 
 func New(config Config, logger *slog.Logger) *Server {
@@ -67,7 +68,7 @@ func New(config Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{})}
+	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session)}
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
@@ -113,6 +114,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 func (s *Server) serveConn(conn net.Conn) {
 	defer func() {
 		s.untrack(conn)
+		s.untrackSession(conn)
 		_ = conn.Close()
 	}()
 
@@ -139,6 +141,7 @@ func (s *Server) serveConn(conn net.Conn) {
 func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.Framer) {
 	_ = conn.SetReadDeadline(time.Now().Add(s.config.LoginTimeout))
 	state := session.New()
+	s.trackSession(conn, state)
 	if err := state.Transition(session.StateLogin); err != nil {
 		return
 	}
@@ -335,6 +338,33 @@ func (s *Server) track(conn net.Conn) {
 	s.mu.Lock()
 	s.conns[conn] = struct{}{}
 	s.mu.Unlock()
+}
+
+func (s *Server) trackSession(conn net.Conn, state *session.Session) {
+	s.mu.Lock()
+	s.sessions[conn] = state
+	s.mu.Unlock()
+}
+
+func (s *Server) untrackSession(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.sessions, conn)
+	s.mu.Unlock()
+}
+
+// Session returns the live session for a client connection, if login has
+// completed far enough to create one.
+func (s *Server) Session(conn net.Conn) (*session.Session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.sessions[conn]
+	return state, ok
+}
+
+func (s *Server) SessionCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.sessions)
 }
 
 func (s *Server) untrack(conn net.Conn) {
