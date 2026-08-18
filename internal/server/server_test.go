@@ -100,11 +100,28 @@ func TestServerShutdownClosesConnections(t *testing.T) {
 	}
 }
 
+func TestServerHandshakeTimeoutClosesSilentConnection(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		New(Config{HandshakeTimeout: 20 * time.Millisecond}, nil).serveConn(serverConn)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("silent connection was not closed after handshake timeout")
+	}
+}
+
 func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
 
-	s := New(Config{}, nil)
+	s := New(Config{KeepAliveInterval: 20 * time.Millisecond, KeepAliveTimeout: time.Second}, nil)
 	done := make(chan struct{})
 	go func() {
 		s.serveConn(serverConn)
@@ -192,6 +209,21 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 		t.Fatalf("keepalive id=%d body=%x err=%v", keepAliveID, keepAliveBody, err)
 	}
 	response := append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), keepAliveBody...)
+	if err := framer.WriteFrame(clientConn, response); err != nil {
+		t.Fatal(err)
+	}
+	secondKeepAlive, err := framer.ReadFrame(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondID, secondBody, err := codec.PacketID(secondKeepAlive)
+	if err != nil || secondID != play.ClientboundKeepAliveID || len(secondBody) != 8 {
+		t.Fatalf("second keepalive id=%d body=%x err=%v", secondID, secondBody, err)
+	}
+	if string(secondBody) == string(keepAliveBody) {
+		t.Fatal("keepalive ID was not advanced")
+	}
+	response = append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), secondBody...)
 	if err := framer.WriteFrame(clientConn, response); err != nil {
 		t.Fatal(err)
 	}
