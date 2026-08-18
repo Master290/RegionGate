@@ -115,3 +115,36 @@ func TestTransportCompressionStateIsIndependent(t *testing.T) {
 		t.Fatal("compression leaked into independent transport")
 	}
 }
+
+func TestTransportEncryptionRoundTripWithCompression(t *testing.T) {
+	left, right := net.Pipe()
+	client := New(left, 1024)
+	server := New(right, 1024)
+	defer client.Close()
+	defer server.Close()
+	key := []byte("0123456789abcdef")
+	for _, transport := range []*Transport{client, server} {
+		if err := transport.EnableCompression(8); err != nil {
+			t.Fatal(err)
+		}
+		if err := transport.EnableEncryption(key, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := append(codec.AppendVarInt(nil, 0x22), make([]byte, 128)...)
+	done := make(chan error, 1)
+	go func() { done <- client.WriteFrame(payload) }()
+	got, err := server.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("payload=%x want=%x", got, payload)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !client.EncryptionEnabled() || !server.EncryptionEnabled() {
+		t.Fatal("encryption state was not enabled")
+	}
+}
