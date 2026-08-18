@@ -38,6 +38,7 @@ services:
     mem_limit: ${REGIONGATE_MEMORY_LIMIT:-256m}
     cpus: ${REGIONGATE_CPU_LIMIT:-1.0}
     networks:
+      - edge
       - backend
 
   paper:
@@ -67,6 +68,7 @@ services:
       - backend
 
 networks:
+  edge:
   backend:
     internal: true
 

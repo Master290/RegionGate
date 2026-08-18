@@ -1,0 +1,8 @@
+services:
+  paper:
+    environment:
+      TYPE: CUSTOM
+      CUSTOM_SERVER: /data/paper.jar
+    volumes:
+      - paper-data:/data
+      - ${PAPER_JAR_PATH:?set PAPER_JAR_PATH to a local Paper jar}:/data/paper.jar:ro

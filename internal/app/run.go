@@ -141,7 +141,10 @@ func healthHandler(gateway *server.Server, adminToken string) http.Handler {
 	})
 	mux.HandleFunc("GET /readyz", func(response http.ResponseWriter, _ *http.Request) {
 		metrics := gateway.Metrics()
-		ready := !metrics.BackendConfigured || metrics.BackendHealthState == 1
+		// A backend is probed during admission, so the initial unknown state must
+		// not prevent the process from becoming ready. Explicitly unhealthy is
+		// the only state that should fail readiness.
+		ready := !metrics.BackendConfigured || metrics.BackendHealthState != 2
 		response.Header().Set("Content-Type", "application/json")
 		if !ready {
 			response.WriteHeader(http.StatusServiceUnavailable)

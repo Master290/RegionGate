@@ -258,6 +258,14 @@ gateway and Paper backend:
 docker compose --env-file .env -f compose.production.yml up --build -d
 ```
 
+If Docker cannot resolve `fill.papermc.io`, download or obtain a Paper
+1.20.4 jar separately and start with the local-jar override:
+
+```powershell
+$env:PAPER_JAR_PATH = "C:\path\paper-1.20.4.jar"
+docker compose --env-file .env -f compose.production.yml -f compose.production.local-paper.yml up --build -d
+```
+
 Only the RegionGate Minecraft listener is published. Paper and the health,
 metrics, and admin endpoints remain on the internal Docker network. The
 RegionGate container runs as a non-root user with a read-only filesystem,
