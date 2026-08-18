@@ -22,6 +22,12 @@ type Start struct {
 	UUID     [16]byte
 }
 
+func StartPayload(username string, uid [16]byte) []byte {
+	payload := codec.AppendVarInt(nil, ServerboundLoginStartID)
+	payload = codec.AppendString(payload, username)
+	return append(payload, uid[:]...)
+}
+
 func ParseStart(payload []byte) (Start, error) {
 	id, body, err := codec.PacketID(payload)
 	if err != nil || id != ServerboundLoginStartID {

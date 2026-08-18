@@ -27,6 +27,14 @@ type Packet struct {
 	NextState       NextState
 }
 
+func Payload(packet Packet) []byte {
+	payload := codec.AppendVarInt(nil, 0x00)
+	payload = codec.AppendVarInt(payload, packet.ProtocolVersion)
+	payload = codec.AppendString(payload, packet.ServerAddress)
+	payload = append(payload, byte(packet.ServerPort>>8), byte(packet.ServerPort))
+	return codec.AppendVarInt(payload, int32(packet.NextState))
+}
+
 func Parse(payload []byte) (Packet, error) {
 	id, body, err := codec.PacketID(payload)
 	if err != nil || id != 0x00 {
