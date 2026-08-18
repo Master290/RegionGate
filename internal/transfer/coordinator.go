@@ -14,10 +14,12 @@ import (
 
 var (
 	ErrTransferAlreadyFinalized = errors.New("transfer is already finalized")
+	ErrTransferTimedOut         = errors.New("transfer barrier timed out")
 )
 
 type Config struct {
 	MaxPendingCommands int
+	BarrierTimeout     time.Duration
 	Login              backend.LoginConfig
 	Configuration      backend.ConfigurationConfig
 }
@@ -34,6 +36,8 @@ type Prepared struct {
 	backend   *transport.Transport
 	packets   [][]byte
 	finalized bool
+	done      chan struct{}
+	finalErr  error
 }
 
 func NewCoordinator(dialer *backend.Dialer, forwarder *forwarding.ModernForwarding, config Config) *Coordinator {
@@ -45,6 +49,9 @@ func NewCoordinator(dialer *backend.Dialer, forwarder *forwarding.ModernForwardi
 func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, identity forwarding.PlayerIdentity, oldKeepAlives []int64) (*Prepared, error) {
 	if c.dialer == nil || c.forwarder == nil {
 		return nil, errors.New("transfer coordinator is not configured")
+	}
+	if c.config.BarrierTimeout <= 0 {
+		c.config.BarrierTimeout = 30 * time.Second
 	}
 	if err := state.BeginTransfer(time.Now(), oldKeepAlives, c.config.MaxPendingCommands); err != nil {
 		return nil, err
@@ -76,7 +83,36 @@ func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, ident
 	if err := state.AdvanceBarrier(session.BarrierAwaitingClientConfiguration); err != nil {
 		return rollback(err, backendConn)
 	}
-	return &Prepared{session: state, backend: backendConn, packets: configuration.Packets}, nil
+	prepared := &Prepared{session: state, backend: backendConn, packets: configuration.Packets, done: make(chan struct{})}
+	go prepared.timeout(c.config.BarrierTimeout)
+	return prepared, nil
+}
+
+func (p *Prepared) timeout(duration time.Duration) {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		p.mu.Lock()
+		if !p.finalized {
+			p.finalized = true
+			p.finalErr = ErrTransferTimedOut
+			close(p.done)
+			if p.backend != nil {
+				_ = p.backend.Close()
+				p.backend = nil
+			}
+			_ = p.session.RollbackTransfer()
+		}
+		p.mu.Unlock()
+	case <-p.done:
+	}
+}
+
+func (p *Prepared) Err() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.finalErr
 }
 
 func (p *Prepared) ConfigurationPackets() [][]byte {
@@ -109,6 +145,9 @@ func (p *Prepared) Release() (session.Replay, *transport.Transport, error) {
 		return session.Replay{}, nil, err
 	}
 	p.finalized = true
+	if p.done != nil {
+		close(p.done)
+	}
 	backendConn := p.backend
 	p.backend = nil
 	return replay, backendConn, nil
@@ -121,6 +160,9 @@ func (p *Prepared) Rollback() error {
 		return ErrTransferAlreadyFinalized
 	}
 	p.finalized = true
+	if p.done != nil {
+		close(p.done)
+	}
 	if p.backend != nil {
 		_ = p.backend.Close()
 		p.backend = nil

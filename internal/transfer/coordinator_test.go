@@ -31,7 +31,7 @@ func TestPreparedLifecycleRequiresClientAcknowledgement(t *testing.T) {
 	left, right := net.Pipe()
 	backendConn := transport.New(left, 1024)
 	defer right.Close()
-	prepared := &Prepared{session: state, backend: backendConn, packets: [][]byte{{1, 2, 3}}}
+	prepared := &Prepared{session: state, backend: backendConn, packets: [][]byte{{1, 2, 3}}, done: make(chan struct{})}
 
 	if _, _, err := prepared.Release(); !errors.Is(err, session.ErrBarrierNotReady) {
 		t.Fatalf("early release error=%v", err)
@@ -66,12 +66,32 @@ func TestPreparedRollbackReturnsToLimbo(t *testing.T) {
 	left, right := net.Pipe()
 	backendConn := transport.New(left, 1024)
 	defer right.Close()
-	prepared := &Prepared{session: state, backend: backendConn}
+	prepared := &Prepared{session: state, backend: backendConn, done: make(chan struct{})}
 	if err := prepared.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	if state.State() != session.StateLimboPlay {
 		t.Fatalf("state=%s", state.State())
+	}
+	if err := backendConn.WriteFrame([]byte{1}); !errors.Is(err, transport.ErrClosed) {
+		t.Fatalf("backend write error=%v", err)
+	}
+}
+
+func TestPreparedTimeoutRollsBackAndClosesBackend(t *testing.T) {
+	state := sessionAtAwaitingClientConfiguration(t)
+	left, right := net.Pipe()
+	backendConn := transport.New(left, 1024)
+	defer right.Close()
+	prepared := &Prepared{session: state, backend: backendConn, done: make(chan struct{})}
+	go prepared.timeout(20 * time.Millisecond)
+	select {
+	case <-prepared.done:
+	case <-time.After(time.Second):
+		t.Fatal("transfer timeout did not fire")
+	}
+	if state.State() != session.StateLimboPlay || !errors.Is(prepared.Err(), ErrTransferTimedOut) {
+		t.Fatalf("state=%s error=%v", state.State(), prepared.Err())
 	}
 	if err := backendConn.WriteFrame([]byte{1}); !errors.Is(err, transport.ErrClosed) {
 		t.Fatalf("backend write error=%v", err)
