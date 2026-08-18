@@ -64,18 +64,17 @@ Implemented:
 - Admission-triggered Limbo-to-backend transfer barrier.
 - Backend and Limbo KeepAlive isolation.
 - Asynchronous Limbo challenge hooks before queue admission.
+- Paper 1.20.4 and FabricProxy-Lite 2.7.0 forwarding integration tests.
+- Allocation and throughput benchmarks with zlib pooling.
+- Opt-in pprof endpoint with graceful shutdown.
 
 Planned:
 
 - Validation with a real vanilla Minecraft 1.20.4 client.
 - Long-running Limbo worker and periodic KeepAlive scheduling.
 - Client settings and additional Configuration packets.
-- Validation against real Paper, Purpur, and Fabric servers.
-- FabricProxy-Lite integration coverage.
-- In-memory player queue and admission scheduler.
-- Anti-bot checks and per-IP rate limiting.
+- Validation against real Purpur servers.
 - Online-mode RSA encryption and Mojang session validation.
-- Compression and forwarding-path profiling.
 - Metrics and administrative API.
 
 ## Protocol Scope
@@ -193,11 +192,20 @@ REGIONGATE_VELOCITY_SECRET=change-me
 ```
 
 Optional variables include `REGIONGATE_LISTEN`, `REGIONGATE_HEALTH_LISTEN`,
+`REGIONGATE_PPROF_LISTEN`,
 `REGIONGATE_BACKEND_HOST`, `REGIONGATE_BACKEND_PORT`, and
 `REGIONGATE_MAX_CONNECTIONS`, `REGIONGATE_MAX_CONNECTIONS_PER_IP`,
 `REGIONGATE_QUEUE_SIZE`, and `REGIONGATE_ADMISSION_INTERVAL`.
 Login throttling is configured with `REGIONGATE_LOGIN_RATE_LIMIT` and
 `REGIONGATE_LOGIN_RATE_WINDOW`.
+
+Profiling is disabled unless `REGIONGATE_PPROF_LISTEN` is set. Bind it to a
+private address, then use the standard Go tools:
+
+```bash
+REGIONGATE_PPROF_LISTEN=127.0.0.1:6060 go run ./cmd/regiongate
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+```
 
 ## Security Model
 

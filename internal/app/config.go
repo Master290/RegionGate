@@ -10,6 +10,7 @@ import (
 type Config struct {
 	ListenAddress       string
 	HealthAddress       string
+	PprofAddress        string
 	BackendAddress      string
 	BackendHost         string
 	BackendPort         uint16
@@ -31,6 +32,7 @@ func loadConfig(getenv func(string) string) (Config, error) {
 	config := Config{
 		ListenAddress:       valueOr(getenv("REGIONGATE_LISTEN"), ":25565"),
 		HealthAddress:       valueOr(getenv("REGIONGATE_HEALTH_LISTEN"), "127.0.0.1:8080"),
+		PprofAddress:        getenv("REGIONGATE_PPROF_LISTEN"),
 		BackendAddress:      getenv("REGIONGATE_BACKEND_ADDRESS"),
 		BackendHost:         valueOr(getenv("REGIONGATE_BACKEND_HOST"), "localhost"),
 		BackendPort:         25565,

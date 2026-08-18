@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"time"
 
 	"github.com/Master290/RegionGate/internal/backend"
@@ -19,6 +20,8 @@ import (
 )
 
 func Run(ctx context.Context, config Config, logger *slog.Logger) error {
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 	var coordinator *transfer.Coordinator
 	var fifo *admissionqueue.FIFO
 	if config.BackendAddress != "" {
@@ -49,7 +52,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 				logger.Warn("queued admission failed", "id", item.ID, "error", err)
 			}
 		}}
-		go scheduler.Run(ctx)
+		go scheduler.Run(runCtx)
 	}
 	listener, err := net.Listen("tcp", config.ListenAddress)
 	if err != nil {
@@ -64,26 +67,57 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		healthErrors <- health.ListenAndServe()
 	}()
 	go func() {
-		<-ctx.Done()
+		<-runCtx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = health.Shutdown(shutdownCtx)
 	}()
+	var pprofErrors <-chan error
+	if config.PprofAddress != "" {
+		profileServer := &http.Server{Addr: config.PprofAddress, Handler: pprofHandler(), ReadHeaderTimeout: 5 * time.Second}
+		errorsChannel := make(chan error, 1)
+		pprofErrors = errorsChannel
+		go func() {
+			logger.Info("pprof endpoint listening", "address", config.PprofAddress)
+			errorsChannel <- profileServer.ListenAndServe()
+		}()
+		go func() {
+			<-runCtx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = profileServer.Shutdown(shutdownCtx)
+		}()
+	}
 
 	logger.Info("minecraft gateway listening", "address", listener.Addr())
 	serveErrors := make(chan error, 1)
-	go func() { serveErrors <- gateway.Serve(ctx, listener) }()
+	go func() { serveErrors <- gateway.Serve(runCtx, listener) }()
 	select {
 	case err := <-serveErrors:
 		return err
 	case err := <-healthErrors:
-		if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
+		if errors.Is(err, http.ErrServerClosed) && runCtx.Err() != nil {
 			return nil
 		}
 		return err
-	case <-ctx.Done():
+	case err := <-pprofErrors:
+		if errors.Is(err, http.ErrServerClosed) && runCtx.Err() != nil {
+			return nil
+		}
+		return err
+	case <-runCtx.Done():
 		return <-serveErrors
 	}
+}
+
+func pprofHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	return mux
 }
 
 func healthHandler(gateway *server.Server) http.Handler {
