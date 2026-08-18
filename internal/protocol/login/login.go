@@ -12,14 +12,49 @@ import (
 var ErrMalformed = errors.New("malformed login packet")
 
 const (
-	ServerboundLoginStartID   = 0x00
-	ServerboundLoginAckID     = 0x03
-	ClientboundLoginSuccessID = 0x02
+	ServerboundLoginStartID     = 0x00
+	ServerboundPluginResponseID = 0x02
+	ServerboundLoginAckID       = 0x03
+	ClientboundLoginSuccessID   = 0x02
+	ClientboundPluginRequestID  = 0x04
 )
 
 type Start struct {
 	Username string
 	UUID     [16]byte
+}
+
+type PluginRequest struct {
+	MessageID int32
+	Channel   string
+	Data      []byte
+}
+
+func ParsePluginRequest(payload []byte) (PluginRequest, error) {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ClientboundPluginRequestID {
+		return PluginRequest{}, ErrMalformed
+	}
+	messageID, used, err := codec.ConsumeVarInt(body)
+	if err != nil || messageID < 0 {
+		return PluginRequest{}, ErrMalformed
+	}
+	body = body[used:]
+	channel, used, err := codec.ConsumeString(body, 32767)
+	if err != nil {
+		return PluginRequest{}, ErrMalformed
+	}
+	return PluginRequest{MessageID: messageID, Channel: channel, Data: append([]byte(nil), body[used:]...)}, nil
+}
+
+func PluginResponsePayload(messageID int32, data []byte) []byte {
+	payload := codec.AppendVarInt(nil, ServerboundPluginResponseID)
+	payload = codec.AppendVarInt(payload, messageID)
+	if data == nil {
+		return append(payload, 0)
+	}
+	payload = append(payload, 1)
+	return append(payload, data...)
 }
 
 func StartPayload(username string, uid [16]byte) []byte {

@@ -40,3 +40,14 @@ func TestFramerRejectsOversizedPacket(t *testing.T) {
 		t.Fatalf("error = %v, want PacketTooLargeError", err)
 	}
 }
+
+func TestConsumeString(t *testing.T) {
+	encoded := AppendString(nil, "Привет")
+	value, used, err := ConsumeString(encoded, 6)
+	if err != nil || value != "Привет" || used != len(encoded) {
+		t.Fatalf("value=%q used=%d err=%v", value, used, err)
+	}
+	if _, _, err := ConsumeString(encoded, 5); err == nil {
+		t.Fatal("expected character limit error")
+	}
+}

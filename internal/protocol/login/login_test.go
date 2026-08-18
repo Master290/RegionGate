@@ -34,3 +34,27 @@ func TestLoginRejectsInvalidUsername(t *testing.T) {
 		t.Fatal("expected invalid username error")
 	}
 }
+
+func TestPluginRequestAndResponse(t *testing.T) {
+	request := codec.AppendVarInt(nil, ClientboundPluginRequestID)
+	request = codec.AppendVarInt(request, 17)
+	request = codec.AppendString(request, "velocity:player_info")
+	request = append(request, 1, 2, 3)
+	parsed, err := ParsePluginRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.MessageID != 17 || parsed.Channel != "velocity:player_info" || string(parsed.Data) != string([]byte{1, 2, 3}) {
+		t.Fatalf("request=%+v", parsed)
+	}
+
+	response := PluginResponsePayload(parsed.MessageID, []byte{4, 5})
+	id, body, err := codec.PacketID(response)
+	if err != nil || id != ServerboundPluginResponseID {
+		t.Fatalf("response id=%d err=%v", id, err)
+	}
+	messageID, used, err := codec.ConsumeVarInt(body)
+	if err != nil || messageID != 17 || string(body[used:]) != string([]byte{1, 4, 5}) {
+		t.Fatalf("message=%d body=%x err=%v", messageID, body[used:], err)
+	}
+}
