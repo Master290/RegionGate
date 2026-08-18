@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,28 @@ func TestPprofHandlerIsSeparateFromHealthHandler(t *testing.T) {
 	healthHandler(server.New(server.Config{}, nil)).ServeHTTP(response, request)
 	if response.Code != 404 {
 		t.Fatalf("health handler exposed pprof status=%d", response.Code)
+	}
+}
+
+func TestMetricsAndAdminStatusExposeGatewaySnapshot(t *testing.T) {
+	gateway := server.New(server.Config{}, nil)
+	metricsResponse := httptest.NewRecorder()
+	metricsHandler(gateway).ServeHTTP(metricsResponse, httptest.NewRequest("GET", "/metrics", nil))
+	if metricsResponse.Code != 200 || !strings.Contains(metricsResponse.Body.String(), "regiongate_sessions_active 0\n") {
+		t.Fatalf("metrics status=%d body=%q", metricsResponse.Code, metricsResponse.Body.String())
+	}
+	if got := metricsResponse.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {
+		t.Fatalf("metrics content type=%q", got)
+	}
+
+	adminResponse := httptest.NewRecorder()
+	adminStatusHandler(gateway).ServeHTTP(adminResponse, httptest.NewRequest("GET", "/admin/status", nil))
+	var snapshot server.MetricsSnapshot
+	if err := json.NewDecoder(adminResponse.Body).Decode(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if adminResponse.Code != 200 || snapshot.Sessions != 0 {
+		t.Fatalf("admin status=%d snapshot=%+v", adminResponse.Code, snapshot)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"strconv"
 	"time"
 
 	"github.com/Master290/RegionGate/internal/backend"
@@ -126,5 +127,36 @@ func healthHandler(gateway *server.Server) http.Handler {
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"status": "ok", "sessions": gateway.SessionCount()})
 	})
+	mux.Handle("GET /metrics", metricsHandler(gateway))
+	mux.Handle("GET /admin/status", adminStatusHandler(gateway))
 	return mux
+}
+
+func metricsHandler(gateway *server.Server) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		metrics := gateway.Metrics()
+		response.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		values := []struct {
+			name  string
+			value uint64
+		}{
+			{"regiongate_connections_active", metrics.ActiveConnections},
+			{"regiongate_sessions_active", metrics.Sessions},
+			{"regiongate_queue_length", metrics.QueueLength},
+			{"regiongate_connections_accepted_total", metrics.Accepted},
+			{"regiongate_connections_rejected_capacity_total", metrics.RejectedCapacity},
+			{"regiongate_connections_rejected_ip_total", metrics.RejectedPerIP},
+			{"regiongate_login_rate_limited_total", metrics.LoginRateLimited},
+		}
+		for _, metric := range values {
+			_, _ = response.Write([]byte(metric.name + " " + strconv.FormatUint(metric.value, 10) + "\n"))
+		}
+	})
+}
+
+func adminStatusHandler(gateway *server.Server) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(gateway.Metrics())
+	})
 }

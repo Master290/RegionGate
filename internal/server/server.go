@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Master290/RegionGate/internal/bridge"
@@ -57,6 +58,20 @@ type Server struct {
 	admissions    map[net.Conn]chan admissionRequest
 	ipConnections map[string]int
 	loginLimiter  *ratelimit.Limiter
+	accepted      atomic.Uint64
+	rejectedCap   atomic.Uint64
+	rejectedIP    atomic.Uint64
+	rateLimited   atomic.Uint64
+}
+
+type MetricsSnapshot struct {
+	ActiveConnections uint64
+	Sessions          uint64
+	QueueLength       uint64
+	Accepted          uint64
+	RejectedCapacity  uint64
+	RejectedPerIP     uint64
+	LoginRateLimited  uint64
 }
 
 type admissionRequest struct {
@@ -139,6 +154,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			_ = conn.Close()
 			return nil
 		}
+		s.accepted.Add(1)
 		select {
 		case s.sem <- struct{}{}:
 			if !s.track(conn) {
@@ -154,6 +170,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 				s.serveConn(conn)
 			}()
 		default:
+			s.rejectedCap.Add(1)
 			_ = conn.Close()
 		}
 	}
@@ -186,6 +203,7 @@ func (s *Server) serveConn(conn net.Conn) {
 		s.serveStatus(client)
 	case handshake.NextLogin:
 		if !s.loginLimiter.Allow(remoteHost(conn.RemoteAddr()), time.Now()) {
+			s.rateLimited.Add(1)
 			s.logger.Warn("login rate limit exceeded", "remote", conn.RemoteAddr())
 			return
 		}
@@ -597,6 +615,7 @@ func (s *Server) track(conn net.Conn) bool {
 	defer s.mu.Unlock()
 	ip := remoteHost(conn.RemoteAddr())
 	if s.ipConnections[ip] >= s.config.MaxConnectionsPerIP {
+		s.rejectedIP.Add(1)
 		return false
 	}
 	s.conns[conn] = struct{}{}
@@ -676,6 +695,26 @@ func (s *Server) SessionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.sessions)
+}
+
+func (s *Server) Metrics() MetricsSnapshot {
+	s.mu.Lock()
+	active := len(s.conns)
+	sessions := len(s.sessions)
+	queue := 0
+	if s.config.AdmissionQueue != nil {
+		queue = s.config.AdmissionQueue.Len()
+	}
+	s.mu.Unlock()
+	return MetricsSnapshot{
+		ActiveConnections: uint64(active),
+		Sessions:          uint64(sessions),
+		QueueLength:       uint64(queue),
+		Accepted:          s.accepted.Load(),
+		RejectedCapacity:  s.rejectedCap.Load(),
+		RejectedPerIP:     s.rejectedIP.Load(),
+		LoginRateLimited:  s.rateLimited.Load(),
+	}
 }
 
 // ClientTransport returns the transport that owns writes for a live client.

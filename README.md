@@ -67,6 +67,7 @@ Implemented:
 - Paper 1.20.4 and FabricProxy-Lite 2.7.0 forwarding integration tests.
 - Allocation and throughput benchmarks with zlib pooling.
 - Opt-in pprof endpoint with graceful shutdown.
+- Read-only Prometheus metrics and admin status endpoints.
 
 Planned:
 
@@ -206,6 +207,9 @@ private address, then use the standard Go tools:
 REGIONGATE_PPROF_LISTEN=127.0.0.1:6060 go run ./cmd/regiongate
 go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 ```
+
+`/metrics` and `/admin/status` are served on the health listener. Keep that
+listener private or protect it with an authenticated reverse proxy.
 
 ## Security Model
 
