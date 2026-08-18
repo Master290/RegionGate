@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
@@ -20,21 +21,24 @@ type writeRequest struct {
 }
 
 type Transport struct {
-	conn      net.Conn
-	reader    *bufio.Reader
-	framer    *codec.Framer
-	writes    chan writeRequest
-	done      chan struct{}
-	closeOnce sync.Once
+	conn          net.Conn
+	reader        *bufio.Reader
+	framer        *codec.Framer
+	maxPacketSize int
+	compression   atomic.Pointer[codec.CompressionState]
+	writes        chan writeRequest
+	done          chan struct{}
+	closeOnce     sync.Once
 }
 
 func New(conn net.Conn, maxPacketSize int) *Transport {
 	t := &Transport{
-		conn:   conn,
-		reader: bufio.NewReader(conn),
-		framer: codec.NewFramer(maxPacketSize),
-		writes: make(chan writeRequest),
-		done:   make(chan struct{}),
+		conn:          conn,
+		reader:        bufio.NewReader(conn),
+		framer:        codec.NewFramer(maxPacketSize),
+		maxPacketSize: maxPacketSize,
+		writes:        make(chan writeRequest),
+		done:          make(chan struct{}),
 	}
 	go t.writerLoop()
 	return t
@@ -43,7 +47,27 @@ func New(conn net.Conn, maxPacketSize int) *Transport {
 func (t *Transport) Conn() net.Conn { return t.conn }
 
 func (t *Transport) ReadFrame() ([]byte, error) {
+	if compression := t.compression.Load(); compression != nil {
+		return compression.ReadFrame(t.reader)
+	}
 	return t.framer.ReadFrame(t.reader, nil)
+}
+
+func (t *Transport) EnableCompression(threshold int) error {
+	compression, err := codec.NewCompressionState(threshold, t.maxPacketSize)
+	if err != nil {
+		return err
+	}
+	t.compression.Store(compression)
+	return nil
+}
+
+func (t *Transport) CompressionThreshold() (int, bool) {
+	compression := t.compression.Load()
+	if compression == nil {
+		return 0, false
+	}
+	return compression.Threshold(), true
 }
 
 func (t *Transport) WriteFrame(payload []byte) error {
@@ -82,7 +106,11 @@ func (t *Transport) writerLoop() {
 	for {
 		select {
 		case request := <-t.writes:
-			request.result <- t.framer.WriteFrame(t.conn, request.payload)
+			if compression := t.compression.Load(); compression != nil {
+				request.result <- compression.WriteFrame(t.conn, request.payload)
+			} else {
+				request.result <- t.framer.WriteFrame(t.conn, request.payload)
+			}
 		case <-t.done:
 			return
 		}

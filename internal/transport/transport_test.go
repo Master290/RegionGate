@@ -79,3 +79,39 @@ func TestTransportRejectsWriteAfterClose(t *testing.T) {
 		t.Fatalf("write error=%v", err)
 	}
 }
+
+func TestTransportCompressionStateIsIndependent(t *testing.T) {
+	left, right := net.Pipe()
+	client := New(left, 1024)
+	server := New(right, 1024)
+	defer client.Close()
+	defer server.Close()
+	if err := client.EnableCompression(8); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.EnableCompression(8); err != nil {
+		t.Fatal(err)
+	}
+	payload := append(codec.AppendVarInt(nil, 0x20), make([]byte, 64)...)
+	done := make(chan error, 1)
+	go func() { done <- client.WriteFrame(payload) }()
+	got, err := server.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("payload=%x want=%x", got, payload)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	uncompressedLeft, uncompressedRight := net.Pipe()
+	uncompressed := New(uncompressedLeft, 1024)
+	peer := New(uncompressedRight, 1024)
+	defer uncompressed.Close()
+	defer peer.Close()
+	if _, enabled := uncompressed.CompressionThreshold(); enabled {
+		t.Fatal("compression leaked into independent transport")
+	}
+}

@@ -57,6 +57,7 @@ Implemented:
 - Graceful listener shutdown and active connection cleanup.
 - Environment-based service configuration and health endpoint.
 - Independent client and backend transports with single writer loops.
+- Independent bounded Minecraft compression state per transport.
 - Backend dialer, Login, Configuration, and Play bridge.
 - Velocity Modern Forwarding payloads with HMAC-SHA256.
 - Admission-triggered Limbo-to-backend transfer barrier.

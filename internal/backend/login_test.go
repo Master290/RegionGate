@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"errors"
 	"net"
 	"testing"
 	"time"
@@ -87,16 +86,43 @@ func TestCompleteLoginHandlesVelocityForwarding(t *testing.T) {
 	}
 }
 
-func TestCompleteLoginRejectsCompression(t *testing.T) {
+func TestCompleteLoginEnablesCompression(t *testing.T) {
 	proxyConn, serverConn := net.Pipe()
 	proxy := transport.New(proxyConn, 1024)
 	server := transport.New(serverConn, 1024)
 	defer proxy.Close()
 	defer server.Close()
 
-	go func() { _ = server.WriteFrame(codec.AppendVarInt(nil, clientboundSetCompressionID)) }()
-	_, err := CompleteLogin(context.Background(), proxy, nil, forwarding.PlayerIdentity{}, LoginConfig{Timeout: time.Second})
-	if !errors.Is(err, ErrUnsupportedCompression) {
-		t.Fatalf("error=%v", err)
+	done := make(chan error, 1)
+	go func() {
+		setCompression := codec.AppendVarInt(nil, clientboundSetCompressionID)
+		setCompression = codec.AppendVarInt(setCompression, 16)
+		if err := server.WriteFrame(setCompression); err != nil {
+			done <- err
+			return
+		}
+		if err := server.EnableCompression(16); err != nil {
+			done <- err
+			return
+		}
+		if err := server.WriteFrame(login.SuccessPayload("Daniar")); err != nil {
+			done <- err
+			return
+		}
+		ack, err := server.ReadFrame()
+		if err == nil {
+			err = login.ParseAcknowledged(ack)
+		}
+		done <- err
+	}()
+	result, err := CompleteLogin(context.Background(), proxy, nil, forwarding.PlayerIdentity{}, LoginConfig{Timeout: time.Second})
+	if err != nil || result.Username != "Daniar" {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	if threshold, enabled := proxy.CompressionThreshold(); !enabled || threshold != 16 {
+		t.Fatalf("compression threshold=%d enabled=%v", threshold, enabled)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

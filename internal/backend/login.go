@@ -13,11 +13,10 @@ import (
 )
 
 var (
-	ErrBackendDisconnected    = errors.New("backend disconnected during login")
-	ErrUnexpectedLoginPacket  = errors.New("unexpected backend login packet")
-	ErrUnsupportedCompression = errors.New("backend compression is not supported")
-	ErrUnsupportedEncryption  = errors.New("backend encryption is not supported")
-	ErrUnexpectedPlugin       = errors.New("unexpected backend login plugin request")
+	ErrBackendDisconnected   = errors.New("backend disconnected during login")
+	ErrUnexpectedLoginPacket = errors.New("unexpected backend login packet")
+	ErrUnsupportedEncryption = errors.New("backend encryption is not supported")
+	ErrUnexpectedPlugin      = errors.New("unexpected backend login plugin request")
 )
 
 const (
@@ -61,7 +60,7 @@ func CompleteLogin(ctx context.Context, backend *transport.Transport, forwarder 
 			}
 			return LoginResult{}, fmt.Errorf("read backend login packet: %w", err)
 		}
-		id, _, err := codec.PacketID(frame)
+		id, body, err := codec.PacketID(frame)
 		if err != nil {
 			return LoginResult{}, ErrUnexpectedLoginPacket
 		}
@@ -94,7 +93,13 @@ func CompleteLogin(ctx context.Context, backend *transport.Transport, forwarder 
 		case clientboundEncryptionRequestID:
 			return LoginResult{}, ErrUnsupportedEncryption
 		case clientboundSetCompressionID:
-			return LoginResult{}, ErrUnsupportedCompression
+			threshold, used, err := codec.ConsumeVarInt(body)
+			if err != nil || threshold < 0 || used != len(body) {
+				return LoginResult{}, ErrUnexpectedLoginPacket
+			}
+			if err := backend.EnableCompression(int(threshold)); err != nil {
+				return LoginResult{}, fmt.Errorf("enable backend compression: %w", err)
+			}
 		default:
 			return LoginResult{}, ErrUnexpectedLoginPacket
 		}
