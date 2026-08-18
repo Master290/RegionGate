@@ -267,6 +267,48 @@ func TestBarrierFrameDispatchCoalescesAndAdvancesClientPhases(t *testing.T) {
 	}
 }
 
+func TestBarrierFrameRejectsDuplicateConfigurationAcknowledgement(t *testing.T) {
+	state := session.New()
+	for _, next := range []session.State{session.StateLogin, session.StateConfiguration, session.StateLimboPlay} {
+		if err := state.Transition(next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := state.BeginTransfer(time.Now(), nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []session.BarrierPhase{session.BarrierBackendLogin, session.BarrierBackendConfiguration, session.BarrierAwaitingClientConfigurationStart} {
+		if err := state.AdvanceBarrier(phase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ack := codec.AppendVarInt(nil, play.ServerboundConfigurationAcknowledgedID)
+	if err := handleBarrierFrame(state, play.ServerboundConfigurationAcknowledgedID, ack); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleBarrierFrame(state, play.ServerboundConfigurationAcknowledgedID, ack); err == nil {
+		t.Fatal("duplicate configuration acknowledgement was accepted")
+	}
+	phase, err := state.BarrierPhase()
+	if err != nil || phase != session.BarrierClientConfiguration {
+		t.Fatalf("phase=%d err=%v", phase, err)
+	}
+	if err := state.AdvanceBarrier(session.BarrierAwaitingClientConfigurationFinish); err != nil {
+		t.Fatal(err)
+	}
+	finish := configuration.FinishAcknowledgedPayload()
+	if err := handleBarrierFrame(state, configuration.ServerboundFinishConfigurationID, finish); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleBarrierFrame(state, configuration.ServerboundFinishConfigurationID, finish); err == nil {
+		t.Fatal("duplicate finish configuration acknowledgement was accepted")
+	}
+	phase, err = state.BarrierPhase()
+	if err != nil || phase != session.BarrierReady {
+		t.Fatalf("phase=%d err=%v", phase, err)
+	}
+}
+
 func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()

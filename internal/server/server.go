@@ -529,6 +529,9 @@ func handleBarrierFrame(state *session.Session, id int32, frame []byte) error {
 		}
 		return state.AdvanceBarrier(session.BarrierReady)
 	}
+	if id == play.ServerboundConfigurationAcknowledgedID || id == configuration.ServerboundFinishConfigurationID {
+		return play.ErrMalformed
+	}
 	switch id {
 	case play.ServerboundKeepAliveID:
 		keepAliveID, err := play.ParseKeepAlive(frame)

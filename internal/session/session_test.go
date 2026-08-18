@@ -85,6 +85,41 @@ func TestSessionTransferRollback(t *testing.T) {
 	}
 }
 
+func TestSessionMovementFloodKeepsOnlyLatestPosition(t *testing.T) {
+	s := New()
+	for _, state := range []State{StateLogin, StateConfiguration, StateLimboPlay} {
+		if err := s.Transition(state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.BeginTransfer(time.Now(), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	const movements = 10000
+	for index := 0; index < movements; index++ {
+		position := Position{X: float64(index), Y: 64, Z: -float64(index), Yaw: float32(index), OnGround: index%2 == 0}
+		disposition, err := s.HandleBarrierInput(Input{Kind: InputMovement, Position: position, HasLook: true})
+		if err != nil || disposition != InputCoalesced {
+			t.Fatalf("movement %d disposition=%d err=%v", index, disposition, err)
+		}
+	}
+	for _, phase := range []BarrierPhase{BarrierBackendLogin, BarrierBackendConfiguration, BarrierAwaitingClientConfigurationStart, BarrierClientConfiguration, BarrierAwaitingClientConfigurationFinish, BarrierReady} {
+		if err := s.AdvanceBarrier(phase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replay, err := s.ReleaseTransfer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.Position == nil || replay.Position.X != movements-1 || replay.Position.Z != -(movements-1) {
+		t.Fatalf("latest position=%+v", replay.Position)
+	}
+	if len(replay.Commands) != 0 {
+		t.Fatalf("unexpected replay commands=%d", len(replay.Commands))
+	}
+}
+
 func TestSessionRejectsInvalidTransitions(t *testing.T) {
 	s := New()
 	if err := s.Transition(StateBackendPlay); err == nil {

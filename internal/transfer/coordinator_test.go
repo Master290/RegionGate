@@ -139,6 +139,31 @@ func TestPreparedTimeoutRollsBackAndClosesBackend(t *testing.T) {
 	}
 }
 
+func TestPreparedClientDisconnectRollsBackAndClosesBackend(t *testing.T) {
+	state := sessionAtAwaitingClientConfiguration(t)
+	backendLeft, backendRight := net.Pipe()
+	backendConn := transport.New(backendLeft, 1024)
+	defer backendRight.Close()
+	prepared := &Prepared{session: state, backend: backendConn, done: make(chan struct{})}
+
+	clientLeft, clientRight := net.Pipe()
+	client := transport.New(clientLeft, 1024)
+	_ = clientRight.Close()
+	if err := prepared.BeginClientConfiguration(client); err == nil {
+		t.Fatal("expected client disconnect error")
+	}
+	_ = client.Close()
+	if err := prepared.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if state.State() != session.StateLimboPlay {
+		t.Fatalf("state=%s", state.State())
+	}
+	if err := backendConn.WriteFrame([]byte{1}); !errors.Is(err, transport.ErrClosed) {
+		t.Fatalf("backend write error=%v", err)
+	}
+}
+
 func sessionAtAwaitingClientConfiguration(t *testing.T) *session.Session {
 	t.Helper()
 	state := session.New()
