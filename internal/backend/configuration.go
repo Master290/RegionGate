@@ -38,17 +38,12 @@ func CompleteConfiguration(ctx context.Context, backend *transport.Transport, co
 		config.MaxBytes = 8 << 20
 	}
 	configCtx, cancel := context.WithTimeout(ctx, config.Timeout)
-	defer cancel()
 	_ = backend.SetReadDeadline(time.Now().Add(config.Timeout))
 	_ = backend.SetWriteDeadline(time.Now().Add(config.Timeout))
-	finished := make(chan struct{})
-	defer close(finished)
-	go func() {
-		select {
-		case <-configCtx.Done():
-			_ = backend.SetReadDeadline(time.Now())
-		case <-finished:
-		}
+	stopInterrupt := interruptOnDone(configCtx, func() { _ = backend.SetReadDeadline(time.Now()) })
+	defer func() {
+		stopInterrupt()
+		cancel()
 	}()
 
 	result := ConfigurationResult{Packets: make([][]byte, 0, config.MaxPackets)}
@@ -73,6 +68,8 @@ func CompleteConfiguration(ctx context.Context, backend *transport.Transport, co
 			if err := backend.WriteFrame(configuration.FinishAcknowledgedPayload()); err != nil {
 				return ConfigurationResult{}, fmt.Errorf("write backend configuration acknowledgement: %w", err)
 			}
+			stopInterrupt()
+			cancel()
 			_ = backend.SetReadDeadline(time.Time{})
 			_ = backend.SetWriteDeadline(time.Time{})
 			return result, nil

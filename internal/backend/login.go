@@ -39,17 +39,12 @@ func CompleteLogin(ctx context.Context, backend *transport.Transport, forwarder 
 		config.Timeout = 10 * time.Second
 	}
 	loginCtx, cancel := context.WithTimeout(ctx, config.Timeout)
-	defer cancel()
 	_ = backend.SetReadDeadline(time.Now().Add(config.Timeout))
 	_ = backend.SetWriteDeadline(time.Now().Add(config.Timeout))
-	finished := make(chan struct{})
-	defer close(finished)
-	go func() {
-		select {
-		case <-loginCtx.Done():
-			_ = backend.SetReadDeadline(time.Now())
-		case <-finished:
-		}
+	stopInterrupt := interruptOnDone(loginCtx, func() { _ = backend.SetReadDeadline(time.Now()) })
+	defer func() {
+		stopInterrupt()
+		cancel()
 	}()
 
 	for {
@@ -85,6 +80,8 @@ func CompleteLogin(ctx context.Context, backend *transport.Transport, forwarder 
 			if err := backend.WriteFrame(codec.AppendVarInt(nil, login.ServerboundLoginAckID)); err != nil {
 				return LoginResult{}, fmt.Errorf("write backend login acknowledgement: %w", err)
 			}
+			stopInterrupt()
+			cancel()
 			_ = backend.SetReadDeadline(time.Time{})
 			_ = backend.SetWriteDeadline(time.Time{})
 			return LoginResult{UUID: uid, Username: username}, nil
