@@ -8,8 +8,9 @@ import (
 const MaxVarIntBytes = 5
 
 var (
-	ErrVarIntTooLong = errors.New("varint exceeds 5 bytes")
-	ErrVarIntPartial = errors.New("incomplete varint")
+	ErrVarIntTooLong  = errors.New("varint exceeds 5 bytes")
+	ErrVarIntPartial  = errors.New("incomplete varint")
+	ErrVarIntOverflow = errors.New("varint exceeds 32 bits")
 )
 
 // ReadVarInt reads a Minecraft signed 32-bit VarInt.
@@ -24,6 +25,9 @@ func ReadVarInt(r io.ByteReader) (int32, error) {
 			return 0, err
 		}
 
+		if position == MaxVarIntBytes-1 && current&0x80 == 0 && current&0x70 != 0 {
+			return 0, ErrVarIntOverflow
+		}
 		value |= uint32(current&0x7f) << (7 * position)
 		if current&0x80 == 0 {
 			return int32(value), nil
@@ -42,6 +46,9 @@ func ConsumeVarInt(data []byte) (int32, int, error) {
 		}
 
 		current := data[position]
+		if position == MaxVarIntBytes-1 && current&0x80 == 0 && current&0x70 != 0 {
+			return 0, 0, ErrVarIntOverflow
+		}
 		value |= uint32(current&0x7f) << (7 * position)
 		if current&0x80 == 0 {
 			return int32(value), position + 1, nil

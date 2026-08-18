@@ -58,7 +58,6 @@ func JoinGamePayload(config JoinGameConfig) []byte {
 	} else {
 		payload = append(payload, 0)
 	}
-	payload = append(payload, config.GameMode, byte(config.PreviousGameMode))
 	payload = codec.AppendVarInt(payload, 1)
 	payload = codec.AppendString(payload, config.WorldName)
 	payload = codec.AppendVarInt(payload, config.MaxPlayers)
@@ -71,6 +70,7 @@ func JoinGamePayload(config JoinGameConfig) []byte {
 	payload = codec.AppendString(payload, config.DimensionName)
 	binary.BigEndian.PutUint64(raw[:], uint64(config.HashedSeed))
 	payload = append(payload, raw[:]...)
+	payload = append(payload, config.GameMode, byte(config.PreviousGameMode))
 	payload = appendBool(payload, config.Debug)
 	payload = appendBool(payload, config.Flat)
 	payload = appendBool(payload, false) // has death location

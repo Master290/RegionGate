@@ -39,8 +39,8 @@ func TestJoinGameContainsExpectedScalars(t *testing.T) {
 	if got := int32(binary.BigEndian.Uint32(body[:4])); got != 7 {
 		t.Fatalf("entity id=%d", got)
 	}
-	if body[4] != 0 || body[5] != 2 || body[6] != 0xff {
-		t.Fatalf("game modes: hardcore=%d game=%d previous=%d", body[4], body[5], body[6])
+	if body[4] != 0 || body[5] != 1 {
+		t.Fatalf("hardcore/dimension count: hardcore=%d count=%d", body[4], body[5])
 	}
 }
 

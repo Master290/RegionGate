@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 )
@@ -54,9 +55,9 @@ func Parse(payload []byte) (Packet, error) {
 	return Packet{ProtocolVersion: version, ServerAddress: address, ServerPort: port, NextState: NextState(next)}, nil
 }
 
-func readString(data []byte, maxBytes int) (string, int, error) {
+func readString(data []byte, maxChars int) (string, int, error) {
 	length, used, err := codec.ConsumeVarInt(data)
-	if err != nil || length < 0 || int64(length) > int64(maxBytes) {
+	if err != nil || length < 0 || int64(length) > int64(maxChars)*3 {
 		return "", 0, ErrMalformed
 	}
 	start := used
@@ -64,7 +65,11 @@ func readString(data []byte, maxBytes int) (string, int, error) {
 	if end > len(data) {
 		return "", 0, ErrMalformed
 	}
-	return string(data[start:end]), end, nil
+	value := data[start:end]
+	if !utf8.Valid(value) || utf8.RuneCount(value) > maxChars {
+		return "", 0, ErrMalformed
+	}
+	return string(value), end, nil
 }
 
 func ValidateVersion(version int32) error {

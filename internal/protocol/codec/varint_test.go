@@ -32,4 +32,7 @@ func TestConsumeVarIntRejectsMalformedInput(t *testing.T) {
 	if _, _, err := ConsumeVarInt([]byte{0x80, 0x80, 0x80, 0x80, 0x80}); !errors.Is(err, ErrVarIntTooLong) {
 		t.Fatalf("long varint error = %v", err)
 	}
+	if _, _, err := ConsumeVarInt([]byte{0xff, 0xff, 0xff, 0xff, 0x7f}); !errors.Is(err, ErrVarIntOverflow) {
+		t.Fatalf("overflow varint error = %v", err)
+	}
 }
