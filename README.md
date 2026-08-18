@@ -74,7 +74,6 @@ Planned:
 - Validation with a real vanilla Minecraft 1.20.4 client.
 - Long-running Limbo worker and periodic KeepAlive scheduling.
 - Client settings and additional Configuration packets.
-- Validation against real Purpur servers.
 - Online-mode RSA encryption and Mojang session validation.
 - Metrics and administrative API.
 
@@ -163,6 +162,12 @@ REGIONGATE_RUN_FABRIC_INTEGRATION=1 go test -tags=integration ./integration/fabr
 ```
 
 It uses Fabric 1.20.4 and FabricProxy-Lite 2.7.0 from Modrinth.
+
+Run the Purpur 1.20.4 integration test:
+
+```bash
+REGIONGATE_RUN_PURPUR_INTEGRATION=1 go test -tags=integration ./integration/purpur -v
+```
 
 Run the performance baseline with allocation counts:
 
