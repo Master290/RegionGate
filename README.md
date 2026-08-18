@@ -71,10 +71,13 @@ Implemented:
 - Opt-in pprof endpoint with graceful shutdown.
 - Read-only Prometheus metrics and admin status endpoints.
 - Backend protocol health state after Login and Configuration.
+- Vanilla Minecraft 1.20.4 client validation through Login, Configuration,
+  Join Game, void chunk initialization, teleport confirmation, and Limbo
+  KeepAlive handling.
 
-Planned:
-
-- Validation with a real vanilla Minecraft 1.20.4 client.
+The vanilla validation uses the unmodified Mojang 1.20.4 client in offline
+mode. A successful run remains connected in Limbo across multiple KeepAlive
+intervals without registry, packet decoder, or protocol-state errors.
 
 ## Protocol Scope
 
