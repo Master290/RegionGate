@@ -75,6 +75,7 @@ type MetricsSnapshot struct {
 	RejectedPerIP      uint64
 	LoginRateLimited   uint64
 	BackendHealthState uint64
+	BackendConfigured  bool
 }
 
 type admissionRequest struct {
@@ -794,6 +795,7 @@ func (s *Server) Metrics() MetricsSnapshot {
 	sessions := len(s.sessions)
 	queue := 0
 	backendHealth := uint64(0)
+	backendConfigured := s.config.TransferCoordinator != nil
 	if s.config.AdmissionQueue != nil {
 		queue = s.config.AdmissionQueue.Len()
 	}
@@ -810,6 +812,7 @@ func (s *Server) Metrics() MetricsSnapshot {
 		RejectedPerIP:      s.rejectedIP.Load(),
 		LoginRateLimited:   s.rateLimited.Load(),
 		BackendHealthState: backendHealth,
+		BackendConfigured:  backendConfigured,
 	}
 }
 

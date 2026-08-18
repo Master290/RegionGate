@@ -139,6 +139,15 @@ func healthHandler(gateway *server.Server, adminToken string) http.Handler {
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"status": "ok", "sessions": gateway.SessionCount()})
 	})
+	mux.HandleFunc("GET /readyz", func(response http.ResponseWriter, _ *http.Request) {
+		metrics := gateway.Metrics()
+		ready := !metrics.BackendConfigured || metrics.BackendHealthState == 1
+		response.Header().Set("Content-Type", "application/json")
+		if !ready {
+			response.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{"ready": ready, "backend_health_state": metrics.BackendHealthState})
+	})
 	mux.Handle("GET /metrics", metricsHandler(gateway))
 	mux.Handle("GET /admin/status", adminStatusHandler(gateway, adminToken))
 	return mux

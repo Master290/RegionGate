@@ -137,6 +137,12 @@ func TestPprofHandlerIsSeparateFromHealthHandler(t *testing.T) {
 
 func TestMetricsAndAdminStatusExposeGatewaySnapshot(t *testing.T) {
 	gateway := server.New(server.Config{}, nil)
+	readyResponse := httptest.NewRecorder()
+	healthHandler(gateway, "").ServeHTTP(readyResponse, httptest.NewRequest("GET", "/readyz", nil))
+	if readyResponse.Code != http.StatusOK || !strings.Contains(readyResponse.Body.String(), `"ready":true`) {
+		t.Fatalf("readiness status=%d body=%q", readyResponse.Code, readyResponse.Body.String())
+	}
+
 	metricsResponse := httptest.NewRecorder()
 	metricsHandler(gateway).ServeHTTP(metricsResponse, httptest.NewRequest("GET", "/metrics", nil))
 	if metricsResponse.Code != 200 || !strings.Contains(metricsResponse.Body.String(), "regiongate_sessions_active 0\n") || !strings.Contains(metricsResponse.Body.String(), "regiongate_backend_health_state 0\n") {

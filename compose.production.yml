@@ -20,7 +20,7 @@ services:
     expose:
       - "8080"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 3

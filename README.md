@@ -199,6 +199,7 @@ Defaults:
 ```text
 Minecraft: :25565
 Health:    127.0.0.1:8080/healthz
+Readiness: 127.0.0.1:8080/readyz
 ```
 
 Backend transfer is enabled when both variables are configured:
