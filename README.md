@@ -61,6 +61,7 @@ Implemented:
 - Velocity Modern Forwarding payloads with HMAC-SHA256.
 - Admission-triggered Limbo-to-backend transfer barrier.
 - Backend and Limbo KeepAlive isolation.
+- Asynchronous Limbo challenge hooks before queue admission.
 
 Planned:
 

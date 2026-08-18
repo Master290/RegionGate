@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Master290/RegionGate/internal/bridge"
+	"github.com/Master290/RegionGate/internal/challenge"
 	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
@@ -41,6 +42,8 @@ type Config struct {
 	QueueStatusInterval time.Duration
 	LoginRateLimit      int
 	LoginRateWindow     time.Duration
+	ChallengeHook       challenge.Hook
+	ChallengeTimeout    time.Duration
 }
 
 type Server struct {
@@ -102,6 +105,9 @@ func New(config Config, logger *slog.Logger) *Server {
 	}
 	if config.LoginRateWindow <= 0 {
 		config.LoginRateWindow = 10 * time.Second
+	}
+	if config.ChallengeTimeout <= 0 {
+		config.ChallengeTimeout = 10 * time.Second
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -324,6 +330,21 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 	var activeAdmission admissionRequest
 	clientConfigurationSent := false
 	queued := false
+	challengeStarted := false
+	var challengeResult <-chan error
+	enqueue := func() error {
+		if queued || s.config.AdmissionQueue == nil || s.config.TransferCoordinator == nil {
+			return nil
+		}
+		if _, err := s.config.AdmissionQueue.Enqueue(admissionqueue.Item{
+			ID: queueID, Context: queueCtx,
+			Admit: func(ctx context.Context) error { return s.Admit(ctx, conn) },
+		}); err != nil {
+			return err
+		}
+		queued = true
+		return nil
+	}
 	var progress func() error
 	progress = func() error {
 		if prepared == nil {
@@ -360,6 +381,14 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 
 	for {
 		select {
+		case err := <-challengeResult:
+			challengeResult = nil
+			if err != nil {
+				return fmt.Errorf("limbo challenge failed: %w", err)
+			}
+			if err := enqueue(); err != nil {
+				return err
+			}
 		case request := <-admissions:
 			if s.config.TransferCoordinator == nil || prepared != nil || state.State() != session.StateLimboPlay {
 				request.result <- errors.New("session is not available for transfer")
@@ -423,14 +452,21 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 					return play.ErrMalformed
 				}
 				pendingKeepAlive = 0
-				if !queued && s.config.AdmissionQueue != nil && s.config.TransferCoordinator != nil {
-					if _, err := s.config.AdmissionQueue.Enqueue(admissionqueue.Item{
-						ID: queueID, Context: queueCtx,
-						Admit: func(ctx context.Context) error { return s.Admit(ctx, conn) },
-					}); err != nil {
-						return err
+				if !challengeStarted {
+					challengeStarted = true
+					if s.config.ChallengeHook == nil {
+						if err := enqueue(); err != nil {
+							return err
+						}
+					} else {
+						result := make(chan error, 1)
+						challengeResult = result
+						go func() {
+							ctx, cancel := context.WithTimeout(queueCtx, s.config.ChallengeTimeout)
+							defer cancel()
+							result <- s.config.ChallengeHook.Verify(ctx, identity)
+						}()
 					}
-					queued = true
 				}
 				if !timeout.Stop() {
 					select {
