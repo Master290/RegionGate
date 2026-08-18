@@ -23,3 +23,16 @@ jobs:
         run: go vet ./...
       - name: Race detector
         run: go test -race ./...
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build production image
+        run: docker build --tag regiongate:ci .
+      - name: Validate production compose
+        env:
+          REGIONGATE_VELOCITY_SECRET: ci-velocity-secret-012345678901234567890123
+          REGIONGATE_ADMIN_TOKEN: ci-admin-token-012345678901234567890123456
+        run: docker compose -f compose.production.yml config --quiet
