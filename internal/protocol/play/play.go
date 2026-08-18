@@ -31,6 +31,8 @@ const (
 
 const overworldSectionCount = 24
 
+const overworldLightSectionMask = (1 << (overworldSectionCount + 2)) - 1
+
 type JoinGameConfig struct {
 	EntityID           int32
 	Hardcore           bool
@@ -129,9 +131,12 @@ func VoidChunkPayload(x, z int32) []byte {
 	payload = codec.AppendVarInt(payload, int32(len(chunkData)))
 	payload = append(payload, chunkData...)
 	payload = codec.AppendVarInt(payload, 0) // block entities
-	for range 6 {
-		payload = codec.AppendVarInt(payload, 0) // light masks and light arrays
-	}
+	payload = codec.AppendVarInt(payload, 0) // sky light mask
+	payload = codec.AppendVarInt(payload, 0) // block light mask
+	payload = appendLightMask(payload, overworldLightSectionMask)
+	payload = appendLightMask(payload, overworldLightSectionMask)
+	payload = codec.AppendVarInt(payload, 0) // sky light arrays
+	payload = codec.AppendVarInt(payload, 0) // block light arrays
 	return payload
 }
 
@@ -291,6 +296,13 @@ func appendBool(dst []byte, value bool) []byte {
 func appendInt32(dst []byte, value int32) []byte {
 	var raw [4]byte
 	binary.BigEndian.PutUint32(raw[:], uint32(value))
+	return append(dst, raw[:]...)
+}
+
+func appendLightMask(dst []byte, mask uint64) []byte {
+	dst = codec.AppendVarInt(dst, 1)
+	var raw [8]byte
+	binary.BigEndian.PutUint64(raw[:], mask)
 	return append(dst, raw[:]...)
 }
 
