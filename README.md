@@ -79,6 +79,11 @@ The vanilla validation uses the unmodified Mojang 1.20.4 client in offline
 mode. A successful run remains connected in Limbo across multiple KeepAlive
 intervals without registry, packet decoder, or protocol-state errors.
 
+The same unmodified client was also verified end to end through the transfer
+barrier into Paper 1.20.4 with Velocity forwarding enabled: the client
+received the backend join chat message, Paper logged the forwarded player UUID
+and login, and the gateway reported a healthy backend state.
+
 ## Protocol Scope
 
 RegionGate currently supports only:
