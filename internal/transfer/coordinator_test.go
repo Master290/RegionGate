@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Master290/RegionGate/internal/forwarding"
+	"github.com/Master290/RegionGate/internal/protocol/configuration"
+	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/session"
 	"github.com/Master290/RegionGate/internal/transport"
 )
@@ -45,13 +47,43 @@ func TestPreparedLifecycleRequiresClientAcknowledgement(t *testing.T) {
 	if prepared.ConfigurationPackets()[0][0] != 1 {
 		t.Fatal("configuration packets were not copied")
 	}
+	clientLeft, clientRight := net.Pipe()
+	client := transport.New(clientLeft, 1024)
+	remoteClient := transport.New(clientRight, 1024)
+	defer client.Close()
+	defer remoteClient.Close()
+	clientRead := make(chan error, 1)
+	go func() {
+		first, err := remoteClient.ReadFrame()
+		if err != nil || string(first) != string(play.StartConfigurationPayload()) {
+			clientRead <- errors.New("invalid start configuration")
+			return
+		}
+		packet, err := remoteClient.ReadFrame()
+		if err != nil || string(packet) != string([]byte{1, 2, 3}) {
+			clientRead <- errors.New("invalid configuration packet")
+			return
+		}
+		finish, err := remoteClient.ReadFrame()
+		if err != nil || string(finish) != string(configuration.FinishPayload()) {
+			clientRead <- errors.New("invalid finish configuration")
+			return
+		}
+		clientRead <- nil
+	}()
+	if err := prepared.BeginClientConfiguration(client); err != nil {
+		t.Fatal(err)
+	}
 	if err := prepared.AcknowledgeClientStart(); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := prepared.Release(); !errors.Is(err, session.ErrBarrierNotReady) {
 		t.Fatalf("release before finish error=%v", err)
 	}
-	if err := prepared.MarkClientConfigurationSent(); err != nil {
+	if err := prepared.WriteClientConfiguration(client); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-clientRead; err != nil {
 		t.Fatal(err)
 	}
 	if err := prepared.AcknowledgeClientConfiguration(); err != nil {

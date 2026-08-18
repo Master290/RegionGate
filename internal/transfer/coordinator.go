@@ -8,6 +8,8 @@ import (
 
 	"github.com/Master290/RegionGate/internal/backend"
 	"github.com/Master290/RegionGate/internal/forwarding"
+	"github.com/Master290/RegionGate/internal/protocol/configuration"
+	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/session"
 	"github.com/Master290/RegionGate/internal/transport"
 )
@@ -125,6 +127,51 @@ func (p *Prepared) ConfigurationPackets() [][]byte {
 	return packets
 }
 
+// BeginClientConfiguration sends the Play-state transition packet. The
+// caller must feed the resulting client ACK into AcknowledgeClientStart.
+func (p *Prepared) BeginClientConfiguration(client *transport.Transport) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finalized {
+		return ErrTransferAlreadyFinalized
+	}
+	phase, err := p.session.BarrierPhase()
+	if err != nil {
+		return err
+	}
+	if phase != session.BarrierAwaitingClientConfigurationStart {
+		return session.ErrBarrierNotReady
+	}
+	return client.WriteFrame(play.StartConfigurationPayload())
+}
+
+// WriteClientConfiguration writes backend packets into the existing client
+// transport and finishes the client Configuration state. The client ACK must
+// be consumed by the session reader before AcknowledgeClientConfiguration.
+func (p *Prepared) WriteClientConfiguration(client *transport.Transport) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finalized {
+		return ErrTransferAlreadyFinalized
+	}
+	phase, err := p.session.BarrierPhase()
+	if err != nil {
+		return err
+	}
+	if phase != session.BarrierClientConfiguration {
+		return session.ErrBarrierNotReady
+	}
+	for _, packet := range p.packets {
+		if err := client.WriteFrame(packet); err != nil {
+			return err
+		}
+	}
+	if err := client.WriteFrame(configuration.FinishPayload()); err != nil {
+		return err
+	}
+	return p.session.AdvanceBarrier(session.BarrierAwaitingClientConfigurationFinish)
+}
+
 func (p *Prepared) AcknowledgeClientStart() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -132,15 +179,6 @@ func (p *Prepared) AcknowledgeClientStart() error {
 		return ErrTransferAlreadyFinalized
 	}
 	return p.session.AdvanceBarrier(session.BarrierClientConfiguration)
-}
-
-func (p *Prepared) MarkClientConfigurationSent() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.finalized {
-		return ErrTransferAlreadyFinalized
-	}
-	return p.session.AdvanceBarrier(session.BarrierAwaitingClientConfigurationFinish)
 }
 
 func (p *Prepared) AcknowledgeClientConfiguration() error {

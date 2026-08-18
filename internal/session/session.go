@@ -47,6 +47,15 @@ func (s *Session) HandleBarrierInput(input Input) (InputDisposition, error) {
 	return s.barrier.handle(input)
 }
 
+func (s *Session) BarrierPhase() (BarrierPhase, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateTransferBarrier || s.barrier == nil {
+		return 0, ErrBarrierInactive
+	}
+	return s.barrier.phase, nil
+}
+
 func (s *Session) AdvanceBarrier(phase BarrierPhase) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
