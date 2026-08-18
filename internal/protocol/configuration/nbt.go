@@ -81,6 +81,16 @@ func (c *Compound) ListOfCompounds(name string, values ...*Compound) *Compound {
 	return c.add(nbtList, name, data)
 }
 
+func (c *Compound) ListOfStrings(name string, values ...string) *Compound {
+	data := make([]byte, 5, 5)
+	data[0] = nbtString
+	binary.BigEndian.PutUint32(data[1:5], uint32(len(values)))
+	for _, value := range values {
+		data = append(data, appendStringPayload(value)...)
+	}
+	return c.add(nbtList, name, data)
+}
+
 func (c *Compound) add(kind byte, name string, data []byte) *Compound {
 	c.fields = append(c.fields, nbtField{name: name, data: append([]byte(nil), data...)})
 	// The tag kind is stored in the first byte of the field payload.

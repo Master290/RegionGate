@@ -327,7 +327,7 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 		close(done)
 	}()
 
-	framer := codec.NewFramer(1024)
+	framer := codec.NewFramer(16 << 10)
 	if err := framer.WriteFrame(clientConn, handshakePayload(handshake.NextLogin)); err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +525,7 @@ func TestServerAdmissionTransfersClientToBackendPlay(t *testing.T) {
 		s.serveConn(serverConn)
 		close(serveDone)
 	}()
-	client := protocolTransport.New(clientConn, 4096)
+	client := protocolTransport.New(clientConn, 16<<10)
 	defer client.Close()
 	if err := client.WriteFrame(handshakePayload(handshake.NextLogin)); err != nil {
 		t.Fatal(err)

@@ -268,6 +268,7 @@ func (s *Server) serveLogin(client *transport.Transport) {
 		return
 	}
 	if err := s.serveLimbo(client, state, identity); err != nil {
+		s.logger.Info("limbo session ended", "remote", conn.RemoteAddr(), "username", identity.Username, "error", err)
 		return
 	}
 	s.logger.Debug("login completed", "remote", conn.RemoteAddr(), "username", identity.Username, "online", s.config.OnlineAuthenticator != nil)
