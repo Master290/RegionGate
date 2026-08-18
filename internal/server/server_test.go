@@ -117,6 +117,32 @@ func TestServerHandshakeTimeoutClosesSilentConnection(t *testing.T) {
 	}
 }
 
+func TestServerRegistersClientTransportForConnectionLifetime(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	s := New(Config{HandshakeTimeout: time.Second}, nil)
+	done := make(chan struct{})
+	go func() {
+		s.serveConn(serverConn)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if client, ok := s.ClientTransport(serverConn); ok && client.Conn() == serverConn {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("client transport was not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	_ = clientConn.Close()
+	<-done
+	if _, ok := s.ClientTransport(serverConn); ok {
+		t.Fatal("client transport was not removed")
+	}
+}
+
 func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()

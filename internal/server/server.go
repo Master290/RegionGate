@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 	"github.com/Master290/RegionGate/internal/session"
+	"github.com/Master290/RegionGate/internal/transport"
 )
 
 type Config struct {
@@ -38,6 +38,7 @@ type Server struct {
 	mu       sync.Mutex
 	conns    map[net.Conn]struct{}
 	sessions map[net.Conn]*session.Session
+	clients  map[net.Conn]*transport.Transport
 }
 
 func New(config Config, logger *slog.Logger) *Server {
@@ -68,7 +69,7 @@ func New(config Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session)}
+	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport)}
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
@@ -115,13 +116,15 @@ func (s *Server) serveConn(conn net.Conn) {
 	defer func() {
 		s.untrack(conn)
 		s.untrackSession(conn)
+		s.untrackClient(conn)
 		_ = conn.Close()
 	}()
 
-	reader := bufio.NewReader(conn)
-	framer := codec.NewFramer(s.config.MaxPacketSize)
+	client := transport.New(conn, s.config.MaxPacketSize)
+	s.trackClient(conn, client)
+	defer client.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(s.config.HandshakeTimeout))
-	frame, err := framer.ReadFrame(reader, nil)
+	frame, err := client.ReadFrame()
 	if err != nil {
 		return
 	}
@@ -132,20 +135,21 @@ func (s *Server) serveConn(conn net.Conn) {
 
 	switch handshakePacket.NextState {
 	case handshake.NextStatus:
-		s.serveStatus(conn, reader, framer)
+		s.serveStatus(client)
 	case handshake.NextLogin:
-		s.serveLogin(conn, reader, framer)
+		s.serveLogin(client)
 	}
 }
 
-func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.Framer) {
+func (s *Server) serveLogin(client *transport.Transport) {
+	conn := client.Conn()
 	_ = conn.SetReadDeadline(time.Now().Add(s.config.LoginTimeout))
 	state := session.New()
 	s.trackSession(conn, state)
 	if err := state.Transition(session.StateLogin); err != nil {
 		return
 	}
-	frame, err := framer.ReadFrame(reader, nil)
+	frame, err := client.ReadFrame()
 	if err != nil {
 		return
 	}
@@ -153,10 +157,10 @@ func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.F
 	if err != nil {
 		return
 	}
-	if err := s.writeFrame(conn, framer, login.SuccessPayload(start.Username)); err != nil {
+	if err := s.writeFrame(client, login.SuccessPayload(start.Username)); err != nil {
 		return
 	}
-	frame, err = framer.ReadFrame(reader, nil)
+	frame, err = client.ReadFrame()
 	if err != nil || login.ParseAcknowledged(frame) != nil {
 		return
 	}
@@ -164,26 +168,27 @@ func (s *Server) serveLogin(conn net.Conn, reader *bufio.Reader, framer *codec.F
 		return
 	}
 	registry, err := configuration.RegistryDataPayload(configuration.MinimalRegistryData())
-	if err != nil || s.writeFrame(conn, framer, registry) != nil {
+	if err != nil || s.writeFrame(client, registry) != nil {
 		return
 	}
-	if err := s.writeFrame(conn, framer, configuration.FinishPayload()); err != nil {
+	if err := s.writeFrame(client, configuration.FinishPayload()); err != nil {
 		return
 	}
-	frame, err = framer.ReadFrame(reader, nil)
+	frame, err = client.ReadFrame()
 	if err != nil || configuration.ParseFinishAcknowledged(frame) != nil {
 		return
 	}
 	if err := state.Transition(session.StateLimboPlay); err != nil {
 		return
 	}
-	if err := s.serveLimbo(conn, reader, framer, start.Username); err != nil {
+	if err := s.serveLimbo(client, start.Username); err != nil {
 		return
 	}
 	s.logger.Debug("offline login completed", "remote", conn.RemoteAddr(), "username", start.Username)
 }
 
-func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.Framer, username string) error {
+func (s *Server) serveLimbo(client *transport.Transport, username string) error {
+	conn := client.Conn()
 	join := play.JoinGamePayload(play.JoinGameConfig{
 		EntityID:           1,
 		WorldName:          "minecraft:overworld",
@@ -197,7 +202,7 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 		RespawnScreen:      true,
 		PortalCooldown:     0,
 	})
-	if err := s.writeFrame(conn, framer, join); err != nil {
+	if err := s.writeFrame(client, join); err != nil {
 		return err
 	}
 	for _, payload := range [][]byte{
@@ -207,13 +212,13 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 		play.SpawnPositionPayload(0, 64, 0, 0),
 		play.PositionLookPayload(0.5, 64, 0.5, 0, 0, 1),
 	} {
-		if err := s.writeFrame(conn, framer, payload); err != nil {
+		if err := s.writeFrame(client, payload); err != nil {
 			return err
 		}
 	}
 
 	for {
-		frame, err := framer.ReadFrame(reader, nil)
+		frame, err := client.ReadFrame()
 		if err != nil {
 			return err
 		}
@@ -236,7 +241,7 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 	_ = conn.SetReadDeadline(time.Time{})
 	go func() {
 		for {
-			frame, err := framer.ReadFrame(reader, nil)
+			frame, err := client.ReadFrame()
 			select {
 			case frames <- readResult{frame: frame, err: err}:
 			case <-readerDone:
@@ -250,7 +255,7 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 
 	keepAliveID := int64(1)
 	pendingKeepAlive := keepAliveID
-	if err := s.writeFrame(conn, framer, play.KeepAlivePayload(keepAliveID)); err != nil {
+	if err := s.writeFrame(client, play.KeepAlivePayload(keepAliveID)); err != nil {
 		return err
 	}
 	ticker := time.NewTicker(s.config.KeepAliveInterval)
@@ -295,7 +300,7 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 			if pendingKeepAlive == 0 {
 				keepAliveID++
 				pendingKeepAlive = keepAliveID
-				if err := s.writeFrame(conn, framer, play.KeepAlivePayload(keepAliveID)); err != nil {
+				if err := s.writeFrame(client, play.KeepAlivePayload(keepAliveID)); err != nil {
 					return err
 				}
 				timeout.Reset(s.config.KeepAliveTimeout)
@@ -307,18 +312,19 @@ func (s *Server) serveLimbo(conn net.Conn, reader *bufio.Reader, framer *codec.F
 	}
 }
 
-func (s *Server) serveStatus(conn net.Conn, reader *bufio.Reader, framer *codec.Framer) {
+func (s *Server) serveStatus(client *transport.Transport) {
+	conn := client.Conn()
 	_ = conn.SetReadDeadline(time.Now().Add(s.config.StatusTimeout))
-	request, err := framer.ReadFrame(reader, nil)
+	request, err := client.ReadFrame()
 	if err != nil || status.ParseRequest(request) != nil {
 		return
 	}
 	response, err := status.ResponsePayload(s.config.Status)
-	if err != nil || s.writeFrame(conn, framer, response) != nil {
+	if err != nil || s.writeFrame(client, response) != nil {
 		return
 	}
 
-	ping, err := framer.ReadFrame(reader, nil)
+	ping, err := client.ReadFrame()
 	if err != nil {
 		return
 	}
@@ -326,12 +332,12 @@ func (s *Server) serveStatus(conn net.Conn, reader *bufio.Reader, framer *codec.
 	if err != nil {
 		return
 	}
-	_ = s.writeFrame(conn, framer, status.PongPayload(value))
+	_ = s.writeFrame(client, status.PongPayload(value))
 }
 
-func (s *Server) writeFrame(conn net.Conn, framer *codec.Framer, payload []byte) error {
-	_ = conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout))
-	return framer.WriteFrame(conn, payload)
+func (s *Server) writeFrame(client *transport.Transport, payload []byte) error {
+	_ = client.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout))
+	return client.WriteFrame(payload)
 }
 
 func (s *Server) track(conn net.Conn) {
@@ -343,6 +349,18 @@ func (s *Server) track(conn net.Conn) {
 func (s *Server) trackSession(conn net.Conn, state *session.Session) {
 	s.mu.Lock()
 	s.sessions[conn] = state
+	s.mu.Unlock()
+}
+
+func (s *Server) trackClient(conn net.Conn, client *transport.Transport) {
+	s.mu.Lock()
+	s.clients[conn] = client
+	s.mu.Unlock()
+}
+
+func (s *Server) untrackClient(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.clients, conn)
 	s.mu.Unlock()
 }
 
@@ -365,6 +383,14 @@ func (s *Server) SessionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.sessions)
+}
+
+// ClientTransport returns the transport that owns writes for a live client.
+func (s *Server) ClientTransport(conn net.Conn) (*transport.Transport, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, ok := s.clients[conn]
+	return client, ok
 }
 
 func (s *Server) untrack(conn net.Conn) {
