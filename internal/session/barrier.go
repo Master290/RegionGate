@@ -74,7 +74,8 @@ type barrierState struct {
 	startedAt       time.Time
 	phase           BarrierPhase
 	limboKeepAlives map[int64]struct{}
-	latestPosition  *Position
+	latestPosition  Position
+	hasPosition     bool
 	commands        []PlayerCommand
 	maxCommands     int
 }
@@ -107,11 +108,12 @@ func (b *barrierState) handle(input Input) (InputDisposition, error) {
 		return InputConsumed, nil
 	case InputMovement:
 		position := input.Position
-		if !input.HasLook && b.latestPosition != nil {
+		if !input.HasLook && b.hasPosition {
 			position.Yaw = b.latestPosition.Yaw
 			position.Pitch = b.latestPosition.Pitch
 		}
-		b.latestPosition = &position
+		b.latestPosition = position
+		b.hasPosition = true
 		return InputCoalesced, nil
 	case InputPlayerCommand:
 		if len(b.commands) >= b.maxCommands {
@@ -126,8 +128,8 @@ func (b *barrierState) handle(input Input) (InputDisposition, error) {
 
 func (b *barrierState) replay() Replay {
 	replay := Replay{Commands: append([]PlayerCommand(nil), b.commands...)}
-	if b.latestPosition != nil {
-		position := *b.latestPosition
+	if b.hasPosition {
+		position := b.latestPosition
 		replay.Position = &position
 	}
 	return replay
