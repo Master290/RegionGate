@@ -141,6 +141,15 @@ Run the race detector in an environment with CGO enabled:
 CGO_ENABLED=1 go test -race ./...
 ```
 
+Run the real Paper 1.20.4 Velocity forwarding integration test with Docker:
+
+```bash
+REGIONGATE_RUN_PAPER_INTEGRATION=1 go test -tags=integration ./integration/paper -v
+```
+
+The test starts an ephemeral Paper container and verifies both a successful
+forwarding login and rejection of an invalid Velocity secret.
+
 ## Running
 
 Start the Minecraft listener and health endpoint:
