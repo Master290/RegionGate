@@ -207,7 +207,7 @@ When enabled, RegionGate performs the Minecraft RSA/AES handshake and validates
 the player through Mojang's `hasJoined` session endpoint before entering Limbo.
 
 Optional variables include `REGIONGATE_LISTEN`, `REGIONGATE_HEALTH_LISTEN`,
-`REGIONGATE_PPROF_LISTEN`,
+`REGIONGATE_PPROF_LISTEN`, `REGIONGATE_ADMIN_TOKEN`,
 `REGIONGATE_BACKEND_HOST`, `REGIONGATE_BACKEND_PORT`, and
 `REGIONGATE_MAX_CONNECTIONS`, `REGIONGATE_MAX_CONNECTIONS_PER_IP`,
 `REGIONGATE_QUEUE_SIZE`, and `REGIONGATE_ADMISSION_INTERVAL`.
@@ -222,8 +222,10 @@ REGIONGATE_PPROF_LISTEN=127.0.0.1:6060 go run ./cmd/regiongate
 go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 ```
 
-`/metrics` and `/admin/status` are served on the health listener. Keep that
-listener private or protect it with an authenticated reverse proxy.
+`/metrics` is served on the health listener. `/admin/status` is disabled unless
+`REGIONGATE_ADMIN_TOKEN` contains at least 32 bytes and requests include
+`Authorization: Bearer <token>`. Keep the listener private even when the token
+is configured.
 
 ## Security Model
 

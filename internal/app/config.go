@@ -11,6 +11,7 @@ type Config struct {
 	ListenAddress       string
 	HealthAddress       string
 	PprofAddress        string
+	AdminToken          string
 	BackendAddress      string
 	BackendHost         string
 	BackendPort         uint16
@@ -35,6 +36,7 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		ListenAddress:       valueOr(getenv("REGIONGATE_LISTEN"), ":25565"),
 		HealthAddress:       valueOr(getenv("REGIONGATE_HEALTH_LISTEN"), "127.0.0.1:8080"),
 		PprofAddress:        getenv("REGIONGATE_PPROF_LISTEN"),
+		AdminToken:          getenv("REGIONGATE_ADMIN_TOKEN"),
 		BackendAddress:      getenv("REGIONGATE_BACKEND_ADDRESS"),
 		BackendHost:         valueOr(getenv("REGIONGATE_BACKEND_HOST"), "localhost"),
 		BackendPort:         25565,
@@ -50,6 +52,9 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		LoginRateWindow:     10 * time.Second,
 	}
 	var err error
+	if config.AdminToken != "" && len(config.AdminToken) < 32 {
+		return Config{}, errors.New("REGIONGATE_ADMIN_TOKEN must contain at least 32 bytes")
+	}
 	if value := getenv("REGIONGATE_ONLINE_MODE"); value != "" {
 		config.OnlineMode, err = strconv.ParseBool(value)
 		if err != nil {

@@ -58,6 +58,27 @@ func TestLoadConfigOnlineMode(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAdminToken(t *testing.T) {
+	valid := "01234567890123456789012345678901"
+	config, err := loadConfig(func(key string) string {
+		if key == "REGIONGATE_ADMIN_TOKEN" {
+			return valid
+		}
+		return ""
+	})
+	if err != nil || config.AdminToken != valid {
+		t.Fatalf("config=%+v error=%v", config, err)
+	}
+	if _, err := loadConfig(func(key string) string {
+		if key == "REGIONGATE_ADMIN_TOKEN" {
+			return "short"
+		}
+		return ""
+	}); err == nil {
+		t.Fatal("short admin token was accepted")
+	}
+}
+
 func TestLoadConfigLoginRateLimit(t *testing.T) {
 	values := map[string]string{
 		"REGIONGATE_LOGIN_RATE_LIMIT":  "25",
@@ -80,7 +101,7 @@ func TestLoadConfigLoginRateLimit(t *testing.T) {
 func TestHealthHandlerReportsSessionCount(t *testing.T) {
 	request := httptest.NewRequest("GET", "/healthz", nil)
 	response := httptest.NewRecorder()
-	healthHandler(server.New(server.Config{}, nil)).ServeHTTP(response, request)
+	healthHandler(server.New(server.Config{}, nil), "").ServeHTTP(response, request)
 	if response.Code != 200 {
 		t.Fatalf("status=%d", response.Code)
 	}
@@ -108,7 +129,7 @@ func TestPprofHandlerIsSeparateFromHealthHandler(t *testing.T) {
 
 	request := httptest.NewRequest("GET", "/debug/pprof/", nil)
 	response := httptest.NewRecorder()
-	healthHandler(server.New(server.Config{}, nil)).ServeHTTP(response, request)
+	healthHandler(server.New(server.Config{}, nil), "").ServeHTTP(response, request)
 	if response.Code != 404 {
 		t.Fatalf("health handler exposed pprof status=%d", response.Code)
 	}
@@ -126,13 +147,41 @@ func TestMetricsAndAdminStatusExposeGatewaySnapshot(t *testing.T) {
 	}
 
 	adminResponse := httptest.NewRecorder()
-	adminStatusHandler(gateway).ServeHTTP(adminResponse, httptest.NewRequest("GET", "/admin/status", nil))
+	adminRequest := httptest.NewRequest("GET", "/admin/status", nil)
+	adminRequest.Header.Set("Authorization", "Bearer 01234567890123456789012345678901")
+	adminStatusHandler(gateway, "01234567890123456789012345678901").ServeHTTP(adminResponse, adminRequest)
 	var snapshot server.MetricsSnapshot
 	if err := json.NewDecoder(adminResponse.Body).Decode(&snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if adminResponse.Code != 200 || snapshot.Sessions != 0 {
 		t.Fatalf("admin status=%d snapshot=%+v", adminResponse.Code, snapshot)
+	}
+}
+
+func TestAdminStatusRequiresConfiguredBearerToken(t *testing.T) {
+	gateway := server.New(server.Config{}, nil)
+	const token = "01234567890123456789012345678901"
+	for _, test := range []struct {
+		name   string
+		token  string
+		header string
+		want   int
+	}{
+		{name: "disabled", want: http.StatusNotFound},
+		{name: "missing", token: token, want: http.StatusUnauthorized},
+		{name: "wrong", token: token, header: "Bearer wrong", want: http.StatusUnauthorized},
+		{name: "valid", token: token, header: "Bearer " + token, want: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest("GET", "/admin/status", nil)
+			request.Header.Set("Authorization", test.header)
+			response := httptest.NewRecorder()
+			adminStatusHandler(gateway, test.token).ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d", response.Code, test.want)
+			}
+		})
 	}
 }
 

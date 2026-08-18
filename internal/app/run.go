@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Master290/RegionGate/internal/auth"
@@ -71,7 +73,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	}
 	defer listener.Close()
 
-	health := &http.Server{Addr: config.HealthAddress, Handler: healthHandler(gateway), ReadHeaderTimeout: 5 * time.Second}
+	health := &http.Server{Addr: config.HealthAddress, Handler: healthHandler(gateway, config.AdminToken), ReadHeaderTimeout: 5 * time.Second}
 	healthErrors := make(chan error, 1)
 	go func() {
 		logger.Info("health endpoint listening", "address", config.HealthAddress)
@@ -131,14 +133,14 @@ func pprofHandler() http.Handler {
 	return mux
 }
 
-func healthHandler(gateway *server.Server) http.Handler {
+func healthHandler(gateway *server.Server, adminToken string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"status": "ok", "sessions": gateway.SessionCount()})
 	})
 	mux.Handle("GET /metrics", metricsHandler(gateway))
-	mux.Handle("GET /admin/status", adminStatusHandler(gateway))
+	mux.Handle("GET /admin/status", adminStatusHandler(gateway, adminToken))
 	return mux
 }
 
@@ -165,8 +167,18 @@ func metricsHandler(gateway *server.Server) http.Handler {
 	})
 }
 
-func adminStatusHandler(gateway *server.Server) http.Handler {
-	return http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+func adminStatusHandler(gateway *server.Server, expectedToken string) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if expectedToken == "" {
+			http.NotFound(response, request)
+			return
+		}
+		provided, ok := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
+		if !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(expectedToken)) != 1 {
+			response.Header().Set("WWW-Authenticate", `Bearer realm="regiongate-admin"`)
+			response.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(gateway.Metrics())
 	})
