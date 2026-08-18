@@ -1,0 +1,74 @@
+services:
+  regiongate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      REGIONGATE_LISTEN: 0.0.0.0:25565
+      REGIONGATE_HEALTH_LISTEN: 0.0.0.0:8080
+      REGIONGATE_BACKEND_ADDRESS: paper:25565
+      REGIONGATE_BACKEND_HOST: paper
+      REGIONGATE_VELOCITY_SECRET: ${REGIONGATE_VELOCITY_SECRET:?set REGIONGATE_VELOCITY_SECRET}
+      REGIONGATE_ADMIN_TOKEN: ${REGIONGATE_ADMIN_TOKEN:?set REGIONGATE_ADMIN_TOKEN}
+      REGIONGATE_MAX_CONNECTIONS: ${REGIONGATE_MAX_CONNECTIONS:-10000}
+      REGIONGATE_MAX_CONNECTIONS_PER_IP: ${REGIONGATE_MAX_CONNECTIONS_PER_IP:-8}
+      REGIONGATE_LOGIN_RATE_LIMIT: ${REGIONGATE_LOGIN_RATE_LIMIT:-10}
+      REGIONGATE_LOGIN_RATE_WINDOW: ${REGIONGATE_LOGIN_RATE_WINDOW:-10s}
+    ports:
+      - "${REGIONGATE_BIND_ADDRESS:-0.0.0.0}:${REGIONGATE_PORT:-25565}:25565/tcp"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      paper:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${REGIONGATE_MEMORY_LIMIT:-256m}
+    cpus: ${REGIONGATE_CPU_LIMIT:-1.0}
+    networks:
+      - backend
+
+  paper:
+    image: itzg/minecraft-server:java21
+    restart: unless-stopped
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: "1.20.4"
+      ONLINE_MODE: "FALSE"
+      ENFORCE_SECURE_PROFILE: "FALSE"
+      VELOCITY_SECRET: ${REGIONGATE_VELOCITY_SECRET:?set REGIONGATE_VELOCITY_SECRET}
+      MEMORY: ${PAPER_MEMORY:-2G}
+    expose:
+      - "25565"
+    healthcheck:
+      test: ["CMD", "mc-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    volumes:
+      - paper-data:/data
+    mem_limit: ${PAPER_MEMORY_LIMIT:-3g}
+    cpus: ${PAPER_CPU_LIMIT:-2.0}
+    networks:
+      - backend
+
+networks:
+  backend:
+    internal: true
+
+volumes:
+  paper-data:

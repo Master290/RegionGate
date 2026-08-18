@@ -248,6 +248,20 @@ Internet -> RegionGate -> Paper / Purpur / Fabric
 
 Backends must be closed to public traffic by firewall rules. RegionGate will be the single source of truth for authentication, anti-bot decisions, queue admission, and signed player forwarding. Velocity Modern Forwarding secrets must never be logged or exposed through administrative APIs.
 
+## Production Docker
+
+Copy `.env.production.example` to `.env`, replace both secrets, then start the
+gateway and Paper backend:
+
+```text
+docker compose --env-file .env -f compose.production.yml up --build -d
+```
+
+Only the RegionGate Minecraft listener is published. Paper and the health,
+metrics, and admin endpoints remain on the internal Docker network. The
+RegionGate container runs as a non-root user with a read-only filesystem,
+dropped capabilities, and resource limits.
+
 ## License
 
 A project license has not been selected yet. Until a license is added, the source code remains under default copyright protection.
