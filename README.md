@@ -75,7 +75,6 @@ Implemented:
 Planned:
 
 - Validation with a real vanilla Minecraft 1.20.4 client.
-- Authenticated administrative API.
 
 ## Protocol Scope
 
