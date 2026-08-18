@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/backend"
+	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
@@ -15,6 +17,8 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 	"github.com/Master290/RegionGate/internal/session"
+	"github.com/Master290/RegionGate/internal/transfer"
+	protocolTransport "github.com/Master290/RegionGate/internal/transport"
 )
 
 func TestServerStatusFlow(t *testing.T) {
@@ -298,6 +302,173 @@ func TestServerOfflineLoginAndConfigurationFlow(t *testing.T) {
 	case <-done:
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+func TestServerAdmissionTransfersClientToBackendPlay(t *testing.T) {
+	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backendListener.Close()
+	secret := []byte("integration-secret")
+	forwarder, err := forwarding.NewModernForwarding(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := backend.NewDialer(backend.Config{Address: backendListener.Addr().String(), Host: "localhost", Port: 25565})
+	coordinator := transfer.NewCoordinator(dialer, forwarder, transfer.Config{BarrierTimeout: time.Second})
+
+	backendDone := make(chan error, 1)
+	go func() {
+		conn, err := backendListener.Accept()
+		if err != nil {
+			backendDone <- err
+			return
+		}
+		server := protocolTransport.New(conn, 4096)
+		defer server.Close()
+		if _, err := server.ReadFrame(); err != nil { // handshake
+			backendDone <- err
+			return
+		}
+		if _, err := server.ReadFrame(); err != nil { // login start
+			backendDone <- err
+			return
+		}
+		request := codec.AppendVarInt(nil, login.ClientboundPluginRequestID)
+		request = codec.AppendVarInt(request, 1)
+		request = codec.AppendString(request, forwarding.VelocityChannel)
+		if err := server.WriteFrame(request); err != nil {
+			backendDone <- err
+			return
+		}
+		if _, err := server.ReadFrame(); err != nil { // forwarding response
+			backendDone <- err
+			return
+		}
+		if err := server.WriteFrame(login.SuccessPayload("Daniar")); err != nil {
+			backendDone <- err
+			return
+		}
+		if _, err := server.ReadFrame(); err != nil { // login ack
+			backendDone <- err
+			return
+		}
+		if err := server.WriteFrame(configuration.FinishPayload()); err != nil {
+			backendDone <- err
+			return
+		}
+		if _, err := server.ReadFrame(); err != nil { // backend finish ack
+			backendDone <- err
+			return
+		}
+		if err := server.WriteFrame(play.KeepAlivePayload(88)); err != nil {
+			backendDone <- err
+			return
+		}
+		response, err := server.ReadFrame()
+		if err != nil {
+			backendDone <- err
+			return
+		}
+		value, err := play.ParseKeepAlive(response)
+		if err != nil || value != 88 {
+			backendDone <- play.ErrMalformed
+			return
+		}
+		backendDone <- nil
+	}()
+
+	serverConn, clientConn := net.Pipe()
+	s := New(Config{TransferCoordinator: coordinator, KeepAliveInterval: time.Second, KeepAliveTimeout: time.Second}, nil)
+	serveDone := make(chan struct{})
+	go func() {
+		s.serveConn(serverConn)
+		close(serveDone)
+	}()
+	client := protocolTransport.New(clientConn, 4096)
+	defer client.Close()
+	if err := client.WriteFrame(handshakePayload(handshake.NextLogin)); err != nil {
+		t.Fatal(err)
+	}
+	start := codec.AppendVarInt(nil, login.ServerboundLoginStartID)
+	start = codec.AppendString(start, "Daniar")
+	start = append(start, make([]byte, 16)...)
+	if err := client.WriteFrame(start); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ReadFrame(); err != nil { // login success
+		t.Fatal(err)
+	}
+	if err := client.WriteFrame(codec.AppendVarInt(nil, login.ServerboundLoginAckID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ReadFrame(); err != nil { // registry
+		t.Fatal(err)
+	}
+	if _, err := client.ReadFrame(); err != nil { // finish configuration
+		t.Fatal(err)
+	}
+	if err := client.WriteFrame(configuration.FinishAcknowledgedPayload()); err != nil {
+		t.Fatal(err)
+	}
+	for range 6 { // join plus five Limbo initialization packets
+		if _, err := client.ReadFrame(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	confirm := codec.AppendVarInt(nil, play.ServerboundTeleportConfirmID)
+	confirm = codec.AppendVarInt(confirm, 1)
+	if err := client.WriteFrame(confirm); err != nil {
+		t.Fatal(err)
+	}
+	limboKeepAlive, err := client.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, limboBody, err := codec.PacketID(limboKeepAlive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WriteFrame(append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), limboBody...)); err != nil {
+		t.Fatal(err)
+	}
+
+	admitDone := make(chan error, 1)
+	go func() { admitDone <- s.Admit(context.Background(), serverConn) }()
+	startConfiguration, err := client.ReadFrame()
+	if err != nil || string(startConfiguration) != string(play.StartConfigurationPayload()) {
+		t.Fatalf("start configuration=%x err=%v", startConfiguration, err)
+	}
+	if err := client.WriteFrame(codec.AppendVarInt(nil, play.ServerboundConfigurationAcknowledgedID)); err != nil {
+		t.Fatal(err)
+	}
+	finish, err := client.ReadFrame()
+	if err != nil || string(finish) != string(configuration.FinishPayload()) {
+		t.Fatalf("finish configuration=%x err=%v", finish, err)
+	}
+	if err := client.WriteFrame(configuration.FinishAcknowledgedPayload()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-admitDone; err != nil {
+		t.Fatal(err)
+	}
+	backendKeepAlive, err := client.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, backendBody, err := codec.PacketID(backendKeepAlive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WriteFrame(append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), backendBody...)); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-backendDone; err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	<-serveDone
 }
 
 func handshakePayload(next handshake.NextState) []byte {

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/bridge"
+	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 	"github.com/Master290/RegionGate/internal/protocol/configuration"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
@@ -16,29 +18,42 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
 	"github.com/Master290/RegionGate/internal/session"
+	"github.com/Master290/RegionGate/internal/transfer"
 	"github.com/Master290/RegionGate/internal/transport"
 )
 
 type Config struct {
-	MaxConnections    int
-	MaxPacketSize     int
-	HandshakeTimeout  time.Duration
-	StatusTimeout     time.Duration
-	LoginTimeout      time.Duration
-	WriteTimeout      time.Duration
-	KeepAliveInterval time.Duration
-	KeepAliveTimeout  time.Duration
-	Status            status.Response
+	MaxConnections      int
+	MaxPacketSize       int
+	HandshakeTimeout    time.Duration
+	StatusTimeout       time.Duration
+	LoginTimeout        time.Duration
+	WriteTimeout        time.Duration
+	KeepAliveInterval   time.Duration
+	KeepAliveTimeout    time.Duration
+	Status              status.Response
+	TransferCoordinator *transfer.Coordinator
 }
 
 type Server struct {
-	config   Config
-	logger   *slog.Logger
-	sem      chan struct{}
-	mu       sync.Mutex
-	conns    map[net.Conn]struct{}
-	sessions map[net.Conn]*session.Session
-	clients  map[net.Conn]*transport.Transport
+	config     Config
+	logger     *slog.Logger
+	sem        chan struct{}
+	mu         sync.Mutex
+	conns      map[net.Conn]struct{}
+	sessions   map[net.Conn]*session.Session
+	clients    map[net.Conn]*transport.Transport
+	admissions map[net.Conn]chan admissionRequest
+}
+
+type admissionRequest struct {
+	ctx    context.Context
+	result chan error
+}
+
+type prepareOutcome struct {
+	prepared *transfer.Prepared
+	err      error
 }
 
 func New(config Config, logger *slog.Logger) *Server {
@@ -69,7 +84,7 @@ func New(config Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport)}
+	return &Server{config: config, logger: logger, sem: make(chan struct{}, config.MaxConnections), conns: make(map[net.Conn]struct{}), sessions: make(map[net.Conn]*session.Session), clients: make(map[net.Conn]*transport.Transport), admissions: make(map[net.Conn]chan admissionRequest)}
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
@@ -117,6 +132,7 @@ func (s *Server) serveConn(conn net.Conn) {
 		s.untrack(conn)
 		s.untrackSession(conn)
 		s.untrackClient(conn)
+		s.untrackAdmission(conn)
 		_ = conn.Close()
 	}()
 
@@ -189,6 +205,9 @@ func (s *Server) serveLogin(client *transport.Transport) {
 
 func (s *Server) serveLimbo(client *transport.Transport, state *session.Session, username string) error {
 	conn := client.Conn()
+	admissions := make(chan admissionRequest, 1)
+	s.trackAdmission(conn, admissions)
+	identity := forwarding.PlayerIdentity{Address: remoteHost(conn.RemoteAddr()), UUID: login.OfflineUUID(username), Username: username}
 	join := play.JoinGamePayload(play.JoinGameConfig{
 		EntityID:           1,
 		WorldName:          "minecraft:overworld",
@@ -231,11 +250,7 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 		}
 	}
 
-	type readResult struct {
-		frame []byte
-		err   error
-	}
-	frames := make(chan readResult)
+	frames := make(chan bridge.ClientFrame)
 	readerDone := make(chan struct{})
 	defer close(readerDone)
 	_ = conn.SetReadDeadline(time.Time{})
@@ -243,7 +258,7 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 		for {
 			frame, err := client.ReadFrame()
 			select {
-			case frames <- readResult{frame: frame, err: err}:
+			case frames <- bridge.ClientFrame{Payload: frame, Err: err}:
 			case <-readerDone:
 				return
 			}
@@ -263,25 +278,106 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 	timeout := time.NewTimer(s.config.KeepAliveTimeout)
 	defer timeout.Stop()
 	var timeoutC <-chan time.Time = timeout.C
+	var prepared *transfer.Prepared
+	var prepareDone <-chan struct{}
+	var prepareResult <-chan prepareOutcome
+	var activeAdmission admissionRequest
+	clientConfigurationSent := false
+	var progress func() error
+	progress = func() error {
+		if prepared == nil {
+			return nil
+		}
+		phase, err := state.BarrierPhase()
+		if err != nil {
+			return err
+		}
+		if phase == session.BarrierClientConfiguration && !clientConfigurationSent {
+			if err := prepared.WriteClientConfiguration(client); err != nil {
+				return err
+			}
+			clientConfigurationSent = true
+		}
+		if phase == session.BarrierReady {
+			replay, backendConn, err := prepared.Release()
+			if err != nil {
+				return err
+			}
+			for _, payload := range transfer.ReplayPayloads(replay) {
+				if err := backendConn.WriteFrame(payload); err != nil {
+					_ = backendConn.Close()
+					return err
+				}
+			}
+			activeAdmission.result <- nil
+			err = bridge.RunPlay(context.Background(), frames, client, backendConn, bridge.Config{})
+			_ = backendConn.Close()
+			return err
+		}
+		return nil
+	}
 
 	for {
 		select {
-		case result := <-frames:
-			if result.err != nil {
-				return result.err
+		case request := <-admissions:
+			if s.config.TransferCoordinator == nil || prepared != nil || state.State() != session.StateLimboPlay {
+				request.result <- errors.New("session is not available for transfer")
+				continue
 			}
-			id, _, packetErr := codec.PacketID(result.frame)
+			activeAdmission = request
+			prepareResultChannel := make(chan prepareOutcome, 1)
+			prepareResult = prepareResultChannel
+			go func() {
+				result, err := s.config.TransferCoordinator.Prepare(request.ctx, state, identity, pendingIDs(pendingKeepAlive))
+				prepareResultChannel <- prepareOutcome{prepared: result, err: err}
+			}()
+		case result := <-prepareResult:
+			prepareResult = nil
+			if result.err != nil {
+				activeAdmission.result <- result.err
+				activeAdmission = admissionRequest{}
+				pendingKeepAlive = 0
+				timeoutC = nil
+				continue
+			}
+			prepared = result.prepared
+			prepareDone = prepared.Done()
+			clientConfigurationSent = false
+			if err := prepared.BeginClientConfiguration(client); err != nil {
+				_ = prepared.Rollback()
+				activeAdmission.result <- err
+				prepared = nil
+				prepareDone = nil
+				continue
+			}
+		case <-prepareDone:
+			if prepared != nil && prepared.Err() != nil {
+				activeAdmission.result <- prepared.Err()
+				prepared = nil
+				prepareDone = nil
+				activeAdmission = admissionRequest{}
+				pendingKeepAlive = 0
+				timeoutC = nil
+			}
+		case result := <-frames:
+			if result.Err != nil {
+				return result.Err
+			}
+			id, _, packetErr := codec.PacketID(result.Payload)
 			if packetErr != nil {
 				return play.ErrMalformed
 			}
 			if state.State() == session.StateTransferBarrier {
-				if err := handleBarrierFrame(state, id, result.frame); err != nil {
+				if err := handleBarrierFrame(state, id, result.Payload); err != nil {
+					return err
+				}
+				if err := progress(); err != nil {
 					return err
 				}
 				continue
 			}
 			if id == play.ServerboundKeepAliveID {
-				value, err := play.ParseKeepAlive(result.frame)
+				value, err := play.ParseKeepAlive(result.Payload)
 				if err != nil || pendingKeepAlive == 0 || value != pendingKeepAlive {
 					return play.ErrMalformed
 				}
@@ -296,7 +392,7 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 				continue
 			}
 			if id == play.ServerboundPositionID || id == play.ServerboundPositionLookID {
-				if err := play.ParseMovement(result.frame); err != nil {
+				if err := play.ParseMovement(result.Payload); err != nil {
 					return err
 				}
 				continue
@@ -413,6 +509,41 @@ func (s *Server) trackClient(conn net.Conn, client *transport.Transport) {
 	s.mu.Unlock()
 }
 
+func (s *Server) trackAdmission(conn net.Conn, requests chan admissionRequest) {
+	s.mu.Lock()
+	s.admissions[conn] = requests
+	s.mu.Unlock()
+}
+
+func (s *Server) untrackAdmission(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.admissions, conn)
+	s.mu.Unlock()
+}
+
+// Admit starts the configured backend transfer for a live Limbo session and
+// returns after the client has entered backend Play.
+func (s *Server) Admit(ctx context.Context, conn net.Conn) error {
+	s.mu.Lock()
+	requests, ok := s.admissions[conn]
+	s.mu.Unlock()
+	if !ok {
+		return errors.New("connection is not in limbo")
+	}
+	request := admissionRequest{ctx: ctx, result: make(chan error, 1)}
+	select {
+	case requests <- request:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-request.result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *Server) untrackClient(conn net.Conn) {
 	s.mu.Lock()
 	delete(s.clients, conn)
@@ -469,4 +600,19 @@ func ListenAndServe(ctx context.Context, address string, config Config, logger *
 	}
 	defer listener.Close()
 	return New(config, logger).Serve(ctx, listener)
+}
+
+func pendingIDs(id int64) []int64 {
+	if id == 0 {
+		return nil
+	}
+	return []int64{id}
+}
+
+func remoteHost(address net.Addr) string {
+	host, _, err := net.SplitHostPort(address.String())
+	if err == nil {
+		return host
+	}
+	return address.String()
 }

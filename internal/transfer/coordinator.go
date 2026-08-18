@@ -117,6 +117,8 @@ func (p *Prepared) Err() error {
 	return p.finalErr
 }
 
+func (p *Prepared) Done() <-chan struct{} { return p.done }
+
 func (p *Prepared) ConfigurationPackets() [][]byte {
 	p.mu.Lock()
 	defer p.mu.Unlock()
