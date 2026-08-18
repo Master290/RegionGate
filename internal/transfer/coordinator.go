@@ -99,12 +99,12 @@ func (p *Prepared) timeout(duration time.Duration) {
 		if !p.finalized {
 			p.finalized = true
 			p.finalErr = ErrTransferTimedOut
-			close(p.done)
 			if p.backend != nil {
 				_ = p.backend.Close()
 				p.backend = nil
 			}
 			_ = p.session.RollbackTransfer()
+			close(p.done)
 		}
 		p.mu.Unlock()
 	case <-p.done:
