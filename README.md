@@ -55,20 +55,25 @@ Implemented:
 - Session state machine and initial `TRANSFER_BARRIER` model.
 - Latest-position coalescing and bounded pending command replay.
 - Graceful listener shutdown and active connection cleanup.
+- Environment-based service configuration and health endpoint.
+- Independent client and backend transports with single writer loops.
+- Backend dialer, Login, Configuration, and Play bridge.
+- Velocity Modern Forwarding payloads with HMAC-SHA256.
+- Admission-triggered Limbo-to-backend transfer barrier.
+- Backend and Limbo KeepAlive isolation.
 
 Planned:
 
 - Validation with a real vanilla Minecraft 1.20.4 client.
 - Long-running Limbo worker and periodic KeepAlive scheduling.
 - Client settings and additional Configuration packets.
-- Backend connector for Paper, Purpur, and Fabric.
-- Velocity Modern Forwarding with HMAC-SHA256.
-- Full Limbo-to-backend transfer barrier.
+- Validation against real Paper, Purpur, and Fabric servers.
+- FabricProxy-Lite integration coverage.
 - In-memory player queue and admission scheduler.
 - Anti-bot checks and per-IP rate limiting.
 - Online-mode RSA encryption and Mojang session validation.
 - Compression and forwarding-path profiling.
-- Metrics, health endpoints, and administrative API.
+- Metrics and administrative API.
 
 ## Protocol Scope
 
@@ -135,13 +140,29 @@ CGO_ENABLED=1 go test -race ./...
 
 ## Running
 
-The application entry point currently initializes the project but does not yet expose a production configuration or start the TCP server automatically:
+Start the Minecraft listener and health endpoint:
 
 ```bash
 go run ./cmd/regiongate
 ```
 
-Server startup, configuration loading, and operational endpoints will be connected after the protocol lifecycle is validated with a real 1.20.4 client.
+Defaults:
+
+```text
+Minecraft: :25565
+Health:    127.0.0.1:8080/healthz
+```
+
+Backend transfer is enabled when both variables are configured:
+
+```text
+REGIONGATE_BACKEND_ADDRESS=127.0.0.1:25566
+REGIONGATE_VELOCITY_SECRET=change-me
+```
+
+Optional variables include `REGIONGATE_LISTEN`, `REGIONGATE_HEALTH_LISTEN`,
+`REGIONGATE_BACKEND_HOST`, `REGIONGATE_BACKEND_PORT`, and
+`REGIONGATE_MAX_CONNECTIONS`.
 
 ## Security Model
 
