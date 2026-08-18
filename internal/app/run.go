@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/auth"
 	"github.com/Master290/RegionGate/internal/backend"
 	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
@@ -25,6 +26,14 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	defer cancelRun()
 	var coordinator *transfer.Coordinator
 	var fifo *admissionqueue.FIFO
+	var onlineAuthenticator *auth.Authenticator
+	if config.OnlineMode {
+		var err error
+		onlineAuthenticator, err = auth.NewAuthenticator(auth.SessionService{URL: config.SessionServerURL})
+		if err != nil {
+			return err
+		}
+	}
 	if config.BackendAddress != "" {
 		forwarder, err := forwarding.NewModernForwarding([]byte(config.VelocitySecret))
 		if err != nil {
@@ -41,6 +50,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		LoginRateLimit: config.LoginRateLimit, LoginRateWindow: config.LoginRateWindow,
 		TransferCoordinator: coordinator,
 		AdmissionQueue:      fifo,
+		OnlineAuthenticator: onlineAuthenticator,
 		Status: status.Response{
 			Version:     status.Version{Name: "1.20.4", Protocol: handshake.ProtocolVersion},
 			Players:     status.Players{Max: config.MaxConnections},

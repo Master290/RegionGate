@@ -40,6 +40,24 @@ func TestLoadConfigPprofAddress(t *testing.T) {
 	}
 }
 
+func TestLoadConfigOnlineMode(t *testing.T) {
+	values := map[string]string{
+		"REGIONGATE_ONLINE_MODE":        "true",
+		"REGIONGATE_SESSION_SERVER_URL": "http://session.test/hasJoined",
+	}
+	config, err := loadConfig(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.OnlineMode || config.SessionServerURL != values["REGIONGATE_SESSION_SERVER_URL"] {
+		t.Fatalf("config=%+v", config)
+	}
+	values["REGIONGATE_ONLINE_MODE"] = "sometimes"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("invalid online-mode value was accepted")
+	}
+}
+
 func TestLoadConfigLoginRateLimit(t *testing.T) {
 	values := map[string]string{
 		"REGIONGATE_LOGIN_RATE_LIMIT":  "25",

@@ -15,6 +15,8 @@ type Config struct {
 	BackendHost         string
 	BackendPort         uint16
 	VelocitySecret      string
+	OnlineMode          bool
+	SessionServerURL    string
 	MaxConnections      int
 	MaxConnectionsPerIP int
 	MaxPacketSize       int
@@ -37,6 +39,7 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		BackendHost:         valueOr(getenv("REGIONGATE_BACKEND_HOST"), "localhost"),
 		BackendPort:         25565,
 		VelocitySecret:      getenv("REGIONGATE_VELOCITY_SECRET"),
+		SessionServerURL:    getenv("REGIONGATE_SESSION_SERVER_URL"),
 		MaxConnections:      10000,
 		MaxConnectionsPerIP: 16,
 		KeepAliveInterval:   15 * time.Second,
@@ -47,6 +50,12 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		LoginRateWindow:     10 * time.Second,
 	}
 	var err error
+	if value := getenv("REGIONGATE_ONLINE_MODE"); value != "" {
+		config.OnlineMode, err = strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("REGIONGATE_ONLINE_MODE must be a boolean")
+		}
+	}
 	if config.BackendPort, err = uint16Value(getenv("REGIONGATE_BACKEND_PORT"), config.BackendPort); err != nil {
 		return Config{}, err
 	}

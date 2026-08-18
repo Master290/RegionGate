@@ -42,6 +42,7 @@ Implemented:
 - Signed 32-bit VarInt codec.
 - Handshake and server list status flow.
 - Offline-mode Login Start and Login Success.
+- Opt-in online-mode RSA encryption and Mojang session validation.
 - Offline UUID generation compatible with `OfflinePlayer:<username>`.
 - Minecraft 1.20.4 Configuration state.
 - Client Information and Configuration plugin-message validation.
@@ -73,9 +74,7 @@ Implemented:
 Planned:
 
 - Validation with a real vanilla Minecraft 1.20.4 client.
-- Long-running Limbo worker and periodic KeepAlive scheduling.
-- Online-mode RSA encryption and Mojang session validation.
-- Metrics and administrative API.
+- Authenticated administrative API.
 
 ## Protocol Scope
 
@@ -85,7 +84,8 @@ RegionGate currently supports only:
 Minecraft Java Edition 1.20.4
 Protocol version 765
 Vanilla-compatible clients
-Offline-mode login
+Offline-mode login by default
+Opt-in online-mode login
 ```
 
 The MVP does not currently support:
@@ -94,7 +94,6 @@ The MVP does not currently support:
 - Forge/FML handshakes.
 - Using Velocity or BungeeCord as an upstream proxy.
 - Bedrock Edition or Geyser-specific handling.
-- Production-ready online-mode authentication.
 
 ## Project Layout
 
@@ -196,6 +195,15 @@ Backend transfer is enabled when both variables are configured:
 REGIONGATE_BACKEND_ADDRESS=127.0.0.1:25566
 REGIONGATE_VELOCITY_SECRET=change-me
 ```
+
+Online-mode authentication is opt-in:
+
+```text
+REGIONGATE_ONLINE_MODE=true
+```
+
+When enabled, RegionGate performs the Minecraft RSA/AES handshake and validates
+the player through Mojang's `hasJoined` session endpoint before entering Limbo.
 
 Optional variables include `REGIONGATE_LISTEN`, `REGIONGATE_HEALTH_LISTEN`,
 `REGIONGATE_PPROF_LISTEN`,

@@ -3,11 +3,15 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/binary"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/auth"
 	"github.com/Master290/RegionGate/internal/backend"
 	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/codec"
@@ -623,6 +627,71 @@ func TestPrepareTransferCancelsWithLimboSession(t *testing.T) {
 	case <-canceled:
 	case <-time.After(time.Second):
 		t.Fatal("backend preparation was not canceled with the Limbo session")
+	}
+}
+
+func TestServerOnlineAuthenticationEnablesEncryption(t *testing.T) {
+	profile := auth.Profile{UUID: [16]byte{1, 2, 3}, Username: "Daniar", Properties: []auth.Property{{Name: "textures", Value: "value", Signature: "signature"}}}
+	verifier := auth.VerifierFunc(func(_ context.Context, username, serverHash, address string) (auth.Profile, error) {
+		if username != profile.Username || serverHash == "" || address != "203.0.113.8" {
+			t.Fatalf("username=%q hash=%q address=%q", username, serverHash, address)
+		}
+		return profile, nil
+	})
+	authenticator, err := auth.NewAuthenticator(verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConn, clientConn := net.Pipe()
+	serverTransport := protocolTransport.New(serverConn, 4096)
+	clientTransport := protocolTransport.New(clientConn, 4096)
+	defer serverTransport.Close()
+	defer clientTransport.Close()
+	s := New(Config{OnlineAuthenticator: authenticator, LoginTimeout: time.Second}, nil)
+
+	result := make(chan forwarding.PlayerIdentity, 1)
+	errors := make(chan error, 1)
+	go func() {
+		identity, err := s.authenticateOnline(serverTransport, profile.Username, "203.0.113.8")
+		if err != nil {
+			errors <- err
+			return
+		}
+		result <- identity
+	}()
+
+	requestPayload, err := clientTransport.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := login.ParseEncryptionRequest(requestPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedKey, err := x509.ParsePKIXPublicKey(request.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey := parsedKey.(*rsa.PublicKey)
+	secret := []byte("0123456789abcdef")
+	encryptedSecret, _ := rsa.EncryptPKCS1v15(rand.Reader, publicKey, secret)
+	encryptedToken, _ := rsa.EncryptPKCS1v15(rand.Reader, publicKey, request.VerifyToken)
+	if err := clientTransport.WriteFrame(login.EncryptionResponsePayload(encryptedSecret, encryptedToken)); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientTransport.EnableEncryption(secret, secret); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case identity := <-result:
+		if identity.UUID != profile.UUID || identity.Username != profile.Username || len(identity.Properties) != 1 || !serverTransport.EncryptionEnabled() {
+			t.Fatalf("identity=%+v encrypted=%v", identity, serverTransport.EncryptionEnabled())
+		}
+	case err := <-errors:
+		t.Fatal(err)
+	case <-time.After(time.Second):
+		t.Fatal("online authentication timed out")
 	}
 }
 

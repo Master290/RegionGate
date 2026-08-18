@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/auth"
 	"github.com/Master290/RegionGate/internal/bridge"
 	"github.com/Master290/RegionGate/internal/challenge"
 	"github.com/Master290/RegionGate/internal/forwarding"
@@ -45,6 +46,7 @@ type Config struct {
 	LoginRateWindow     time.Duration
 	ChallengeHook       challenge.Hook
 	ChallengeTimeout    time.Duration
+	OnlineAuthenticator *auth.Authenticator
 }
 
 type Server struct {
@@ -229,7 +231,19 @@ func (s *Server) serveLogin(client *transport.Transport) {
 	if err != nil {
 		return
 	}
-	if err := s.writeFrame(client, login.SuccessPayload(start.Username)); err != nil {
+	identity := forwarding.PlayerIdentity{Address: remoteHost(conn.RemoteAddr()), UUID: login.OfflineUUID(start.Username), Username: start.Username}
+	if s.config.OnlineAuthenticator != nil {
+		identity, err = s.authenticateOnline(client, start.Username, identity.Address)
+		if err != nil {
+			s.logger.Warn("online authentication failed", "remote", conn.RemoteAddr(), "username", start.Username, "error", err)
+			return
+		}
+	}
+	properties := make([]login.Property, len(identity.Properties))
+	for index, property := range identity.Properties {
+		properties[index] = login.Property{Name: property.Name, Value: property.Value, Signature: property.Signature}
+	}
+	if err := s.writeFrame(client, login.SuccessProfilePayload(identity.UUID, identity.Username, properties)); err != nil {
 		return
 	}
 	frame, err = client.ReadFrame()
@@ -252,10 +266,42 @@ func (s *Server) serveLogin(client *transport.Transport) {
 	if err := state.Transition(session.StateLimboPlay); err != nil {
 		return
 	}
-	if err := s.serveLimbo(client, state, start.Username); err != nil {
+	if err := s.serveLimbo(client, state, identity); err != nil {
 		return
 	}
-	s.logger.Debug("offline login completed", "remote", conn.RemoteAddr(), "username", start.Username)
+	s.logger.Debug("login completed", "remote", conn.RemoteAddr(), "username", identity.Username, "online", s.config.OnlineAuthenticator != nil)
+}
+
+func (s *Server) authenticateOnline(client *transport.Transport, username, address string) (forwarding.PlayerIdentity, error) {
+	challenge, err := s.config.OnlineAuthenticator.Begin()
+	if err != nil {
+		return forwarding.PlayerIdentity{}, err
+	}
+	if err := s.writeFrame(client, login.EncryptionRequestPayload("", challenge.PublicKey(), challenge.VerifyToken(), true)); err != nil {
+		return forwarding.PlayerIdentity{}, err
+	}
+	frame, err := client.ReadFrame()
+	if err != nil {
+		return forwarding.PlayerIdentity{}, err
+	}
+	response, err := login.ParseEncryptionResponse(frame)
+	if err != nil {
+		return forwarding.PlayerIdentity{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.LoginTimeout)
+	defer cancel()
+	profile, secret, err := s.config.OnlineAuthenticator.Authenticate(ctx, challenge, username, address, response.SharedSecret, response.VerifyToken)
+	if err != nil {
+		return forwarding.PlayerIdentity{}, err
+	}
+	if err := client.EnableEncryption(secret, secret); err != nil {
+		return forwarding.PlayerIdentity{}, err
+	}
+	properties := make([]forwarding.Property, len(profile.Properties))
+	for index, property := range profile.Properties {
+		properties[index] = forwarding.Property{Name: property.Name, Value: property.Value, Signature: property.Signature}
+	}
+	return forwarding.PlayerIdentity{Address: address, UUID: profile.UUID, Username: profile.Username, Properties: properties}, nil
 }
 
 func readClientConfiguration(client *transport.Transport) error {
@@ -278,11 +324,10 @@ func readClientConfiguration(client *transport.Transport) error {
 	return configuration.ErrMalformed
 }
 
-func (s *Server) serveLimbo(client *transport.Transport, state *session.Session, username string) error {
+func (s *Server) serveLimbo(client *transport.Transport, state *session.Session, identity forwarding.PlayerIdentity) error {
 	conn := client.Conn()
 	admissions := make(chan admissionRequest, 1)
 	s.trackAdmission(conn, admissions)
-	identity := forwarding.PlayerIdentity{Address: remoteHost(conn.RemoteAddr()), UUID: login.OfflineUUID(username), Username: username}
 	queueID := hex.EncodeToString(identity.UUID[:])
 	queueCtx, cancelQueue := context.WithCancel(context.Background())
 	defer cancelQueue()

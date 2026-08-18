@@ -12,12 +12,16 @@ import (
 var ErrMalformed = errors.New("malformed login packet")
 
 const (
-	ServerboundLoginStartID     = 0x00
-	ServerboundPluginResponseID = 0x02
-	ServerboundLoginAckID       = 0x03
-	ClientboundLoginSuccessID   = 0x02
-	ClientboundPluginRequestID  = 0x04
+	ServerboundLoginStartID         = 0x00
+	ServerboundEncryptionResponseID = 0x01
+	ServerboundPluginResponseID     = 0x02
+	ServerboundLoginAckID           = 0x03
+	ClientboundEncryptionRequestID  = 0x01
+	ClientboundLoginSuccessID       = 0x02
+	ClientboundPluginRequestID      = 0x04
 )
+
+const maxEncryptionFieldSize = 1024
 
 type Start struct {
 	Username string
@@ -28,6 +32,84 @@ type PluginRequest struct {
 	MessageID int32
 	Channel   string
 	Data      []byte
+}
+
+type EncryptionRequest struct {
+	ServerID           string
+	PublicKey          []byte
+	VerifyToken        []byte
+	ShouldAuthenticate bool
+}
+
+type EncryptionResponse struct {
+	SharedSecret []byte
+	VerifyToken  []byte
+}
+
+type Property struct {
+	Name      string
+	Value     string
+	Signature string
+}
+
+func EncryptionRequestPayload(serverID string, publicKey, verifyToken []byte, shouldAuthenticate bool) []byte {
+	payload := codec.AppendVarInt(nil, ClientboundEncryptionRequestID)
+	payload = codec.AppendString(payload, serverID)
+	payload = appendByteArray(payload, publicKey)
+	payload = appendByteArray(payload, verifyToken)
+	if shouldAuthenticate {
+		return append(payload, 1)
+	}
+	return append(payload, 0)
+}
+
+func ParseEncryptionRequest(payload []byte) (EncryptionRequest, error) {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ClientboundEncryptionRequestID {
+		return EncryptionRequest{}, ErrMalformed
+	}
+	serverID, used, err := readString(body, 20)
+	if err != nil {
+		return EncryptionRequest{}, ErrMalformed
+	}
+	body = body[used:]
+	publicKey, used, err := consumeByteArray(body, maxEncryptionFieldSize)
+	if err != nil {
+		return EncryptionRequest{}, err
+	}
+	body = body[used:]
+	verifyToken, used, err := consumeByteArray(body, maxEncryptionFieldSize)
+	if err != nil {
+		return EncryptionRequest{}, err
+	}
+	body = body[used:]
+	if len(body) != 1 || body[0] > 1 {
+		return EncryptionRequest{}, ErrMalformed
+	}
+	return EncryptionRequest{ServerID: serverID, PublicKey: publicKey, VerifyToken: verifyToken, ShouldAuthenticate: body[0] == 1}, nil
+}
+
+func EncryptionResponsePayload(sharedSecret, verifyToken []byte) []byte {
+	payload := codec.AppendVarInt(nil, ServerboundEncryptionResponseID)
+	payload = appendByteArray(payload, sharedSecret)
+	return appendByteArray(payload, verifyToken)
+}
+
+func ParseEncryptionResponse(payload []byte) (EncryptionResponse, error) {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ServerboundEncryptionResponseID {
+		return EncryptionResponse{}, ErrMalformed
+	}
+	sharedSecret, used, err := consumeByteArray(body, maxEncryptionFieldSize)
+	if err != nil {
+		return EncryptionResponse{}, err
+	}
+	body = body[used:]
+	verifyToken, used, err := consumeByteArray(body, maxEncryptionFieldSize)
+	if err != nil || used != len(body) {
+		return EncryptionResponse{}, ErrMalformed
+	}
+	return EncryptionResponse{SharedSecret: sharedSecret, VerifyToken: verifyToken}, nil
 }
 
 func ParsePluginRequest(payload []byte) (PluginRequest, error) {
@@ -101,11 +183,25 @@ func ParseAcknowledged(payload []byte) error {
 }
 
 func SuccessPayload(username string) []byte {
+	return SuccessProfilePayload(OfflineUUID(username), username, nil)
+}
+
+func SuccessProfilePayload(uid [16]byte, username string, properties []Property) []byte {
 	payload := codec.AppendVarInt(nil, ClientboundLoginSuccessID)
-	uid := OfflineUUID(username)
 	payload = append(payload, uid[:]...)
 	payload = codec.AppendString(payload, username)
-	return append(payload, 0)
+	payload = codec.AppendVarInt(payload, int32(len(properties)))
+	for _, property := range properties {
+		payload = codec.AppendString(payload, property.Name)
+		payload = codec.AppendString(payload, property.Value)
+		if property.Signature == "" {
+			payload = append(payload, 0)
+			continue
+		}
+		payload = append(payload, 1)
+		payload = codec.AppendString(payload, property.Signature)
+	}
+	return payload
 }
 
 // OfflineUUID follows java.util.UUID.nameUUIDFromBytes for OfflinePlayer names.
@@ -153,4 +249,21 @@ func ReadUUID(payload []byte) ([16]byte, string, error) {
 
 func ReadPort(data []byte) uint16 {
 	return binary.BigEndian.Uint16(data)
+}
+
+func appendByteArray(dst, value []byte) []byte {
+	dst = codec.AppendVarInt(dst, int32(len(value)))
+	return append(dst, value...)
+}
+
+func consumeByteArray(data []byte, limit int) ([]byte, int, error) {
+	length, used, err := codec.ConsumeVarInt(data)
+	if err != nil || length < 0 || int(length) > limit {
+		return nil, 0, ErrMalformed
+	}
+	end := used + int(length)
+	if end > len(data) {
+		return nil, 0, ErrMalformed
+	}
+	return append([]byte(nil), data[used:end]...), end, nil
 }
