@@ -90,6 +90,17 @@ func TestMovementRejectsNonFiniteValues(t *testing.T) {
 	}
 }
 
+func TestPlayerCommandEncoding(t *testing.T) {
+	payload := PlayerCommandPayload(7, 1, 2)
+	command, err := ParsePlayerCommand(payload)
+	if err != nil || command != (PlayerCommand{EntityID: 7, ActionID: 1, Data: 2}) {
+		t.Fatalf("command=%+v err=%v", command, err)
+	}
+	if _, err := ParsePlayerCommand(PlayerCommandPayload(7, 99, 2)); err == nil {
+		t.Fatal("expected invalid action rejection")
+	}
+}
+
 func TestVoidChunkPacket(t *testing.T) {
 	payload := VoidChunkPayload(0, 0)
 	id, body, err := codec.PacketID(payload)

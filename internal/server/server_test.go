@@ -14,6 +14,7 @@ import (
 	"github.com/Master290/RegionGate/internal/protocol/login"
 	"github.com/Master290/RegionGate/internal/protocol/play"
 	"github.com/Master290/RegionGate/internal/protocol/status"
+	"github.com/Master290/RegionGate/internal/session"
 )
 
 func TestServerStatusFlow(t *testing.T) {
@@ -140,6 +141,44 @@ func TestServerRegistersClientTransportForConnectionLifetime(t *testing.T) {
 	<-done
 	if _, ok := s.ClientTransport(serverConn); ok {
 		t.Fatal("client transport was not removed")
+	}
+}
+
+func TestBarrierFrameDispatchCoalescesAndAdvancesClientPhases(t *testing.T) {
+	state := session.New()
+	for _, next := range []session.State{session.StateLogin, session.StateConfiguration, session.StateLimboPlay} {
+		if err := state.Transition(next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := state.BeginTransfer(time.Unix(1, 0), []int64{9}, 2); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []session.BarrierPhase{session.BarrierBackendLogin, session.BarrierBackendConfiguration, session.BarrierAwaitingClientConfigurationStart} {
+		if err := state.AdvanceBarrier(phase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := handleBarrierFrame(state, play.ServerboundPositionLookID, play.ServerboundPositionLookPayload(1, 64, 2, 30, 5, true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleBarrierFrame(state, play.ServerboundKeepAliveID, append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), make([]byte, 8)...)); err == nil {
+		t.Fatal("expected stale keepalive rejection")
+	}
+	keepAlive := append(codec.AppendVarInt(nil, play.ServerboundKeepAliveID), make([]byte, 8)...)
+	keepAlive[len(keepAlive)-1] = 9
+	if err := handleBarrierFrame(state, play.ServerboundKeepAliveID, keepAlive); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleBarrierFrame(state, play.ServerboundConfigurationAcknowledgedID, codec.AppendVarInt(nil, play.ServerboundConfigurationAcknowledgedID)); err != nil {
+		t.Fatal(err)
+	}
+	if state.State() != session.StateTransferBarrier {
+		t.Fatalf("state=%s", state.State())
+	}
+	phase, _ := state.BarrierPhase()
+	if phase != session.BarrierClientConfiguration {
+		t.Fatalf("phase=%d", phase)
 	}
 }
 

@@ -59,6 +59,12 @@ type Movement struct {
 	HasLook  bool
 }
 
+type PlayerCommand struct {
+	EntityID int32
+	ActionID int32
+	Data     int32
+}
+
 func JoinGamePayload(config JoinGameConfig) []byte {
 	payload := codec.AppendVarInt(nil, ClientboundJoinGameID)
 	var raw [8]byte
@@ -182,6 +188,26 @@ func PlayerCommandPayload(entityID, actionID, data int32) []byte {
 	payload = codec.AppendVarInt(payload, entityID)
 	payload = codec.AppendVarInt(payload, actionID)
 	return codec.AppendVarInt(payload, data)
+}
+
+func ParsePlayerCommand(payload []byte) (PlayerCommand, error) {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != ServerboundPlayerCommandID {
+		return PlayerCommand{}, ErrMalformed
+	}
+	values := [3]int32{}
+	for index := range values {
+		value, used, err := codec.ConsumeVarInt(body)
+		if err != nil {
+			return PlayerCommand{}, ErrMalformed
+		}
+		values[index] = value
+		body = body[used:]
+	}
+	if len(body) != 0 || values[0] < 0 || values[1] < 0 || values[1] > 8 || values[2] < 0 {
+		return PlayerCommand{}, ErrMalformed
+	}
+	return PlayerCommand{EntityID: values[0], ActionID: values[1], Data: values[2]}, nil
 }
 
 func ParseTeleportConfirm(payload []byte) (int32, error) {

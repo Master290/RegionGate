@@ -181,13 +181,13 @@ func (s *Server) serveLogin(client *transport.Transport) {
 	if err := state.Transition(session.StateLimboPlay); err != nil {
 		return
 	}
-	if err := s.serveLimbo(client, start.Username); err != nil {
+	if err := s.serveLimbo(client, state, start.Username); err != nil {
 		return
 	}
 	s.logger.Debug("offline login completed", "remote", conn.RemoteAddr(), "username", start.Username)
 }
 
-func (s *Server) serveLimbo(client *transport.Transport, username string) error {
+func (s *Server) serveLimbo(client *transport.Transport, state *session.Session, username string) error {
 	conn := client.Conn()
 	join := play.JoinGamePayload(play.JoinGameConfig{
 		EntityID:           1,
@@ -274,6 +274,12 @@ func (s *Server) serveLimbo(client *transport.Transport, username string) error 
 			if packetErr != nil {
 				return play.ErrMalformed
 			}
+			if state.State() == session.StateTransferBarrier {
+				if err := handleBarrierFrame(state, id, result.frame); err != nil {
+					return err
+				}
+				continue
+			}
 			if id == play.ServerboundKeepAliveID {
 				value, err := play.ParseKeepAlive(result.frame)
 				if err != nil || pendingKeepAlive == 0 || value != pendingKeepAlive {
@@ -297,7 +303,7 @@ func (s *Server) serveLimbo(client *transport.Transport, username string) error 
 			}
 			return play.ErrMalformed
 		case <-ticker.C:
-			if pendingKeepAlive == 0 {
+			if state.State() == session.StateLimboPlay && pendingKeepAlive == 0 {
 				keepAliveID++
 				pendingKeepAlive = keepAliveID
 				if err := s.writeFrame(client, play.KeepAlivePayload(keepAliveID)); err != nil {
@@ -309,6 +315,55 @@ func (s *Server) serveLimbo(client *transport.Transport, username string) error 
 		case <-timeoutC:
 			return fmt.Errorf("limbo keepalive %d timed out", pendingKeepAlive)
 		}
+	}
+}
+
+func handleBarrierFrame(state *session.Session, id int32, frame []byte) error {
+	phase, err := state.BarrierPhase()
+	if err != nil {
+		return err
+	}
+	if phase == session.BarrierAwaitingClientConfigurationStart && id == play.ServerboundConfigurationAcknowledgedID {
+		if err := play.ParseConfigurationAcknowledged(frame); err != nil {
+			return err
+		}
+		return state.AdvanceBarrier(session.BarrierClientConfiguration)
+	}
+	if phase == session.BarrierAwaitingClientConfigurationFinish && id == configuration.ServerboundFinishConfigurationID {
+		if err := configuration.ParseFinishAcknowledged(frame); err != nil {
+			return err
+		}
+		return state.AdvanceBarrier(session.BarrierReady)
+	}
+	switch id {
+	case play.ServerboundKeepAliveID:
+		keepAliveID, err := play.ParseKeepAlive(frame)
+		if err != nil {
+			return err
+		}
+		_, err = state.HandleBarrierInput(session.Input{Kind: session.InputKeepAlive, KeepAliveID: keepAliveID})
+		return err
+	case play.ServerboundPositionID, play.ServerboundPositionLookID:
+		movement, err := play.DecodeMovement(frame)
+		if err != nil {
+			return err
+		}
+		_, err = state.HandleBarrierInput(session.Input{Kind: session.InputMovement, HasLook: movement.HasLook, Position: session.Position{
+			X: movement.X, Y: movement.Y, Z: movement.Z, Yaw: movement.Yaw, Pitch: movement.Pitch, OnGround: movement.OnGround,
+		}})
+		return err
+	case play.ServerboundPlayerCommandID:
+		command, err := play.ParsePlayerCommand(frame)
+		if err != nil {
+			return err
+		}
+		_, err = state.HandleBarrierInput(session.Input{Kind: session.InputPlayerCommand, Command: session.PlayerCommand{
+			EntityID: command.EntityID, ActionID: command.ActionID, Data: command.Data,
+		}})
+		return err
+	default:
+		_, err := state.HandleBarrierInput(session.Input{Kind: session.InputUnsafe})
+		return err
 	}
 }
 
