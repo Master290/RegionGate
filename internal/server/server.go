@@ -458,6 +458,16 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 					return err
 				}
 			}
+			// Login, limbo, and configuration writes use short deadlines. Clear
+			// them before handing the sockets to the long-lived play bridge.
+			if err := client.SetWriteDeadline(time.Time{}); err != nil {
+				_ = backendConn.Close()
+				return err
+			}
+			if err := backendConn.SetWriteDeadline(time.Time{}); err != nil {
+				_ = backendConn.Close()
+				return err
+			}
 			activeAdmission.result <- nil
 			err = bridge.RunPlay(context.Background(), frames, client, backendConn, bridge.Config{})
 			_ = backendConn.Close()
