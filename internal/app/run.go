@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -37,12 +38,17 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	if config.BotFilterConfigFile != "" {
 		policy, err := botfilter.LoadFile(config.BotFilterConfigFile)
 		if err != nil {
-			return fmt.Errorf("load bot filter policy: %w", err)
-		}
-		botManager = botfilter.New(policy, config.BotFilterConfigFile)
-		botManager.Start(runCtx)
-		if policy.BotFilter.Enabled {
-			challengeHook = botManager
+			if os.IsNotExist(err) {
+				logger.Warn("bot filter disabled: policy file does not exist", "path", config.BotFilterConfigFile)
+			} else {
+				return fmt.Errorf("load bot filter policy: %w", err)
+			}
+		} else {
+			botManager = botfilter.New(policy, config.BotFilterConfigFile)
+			botManager.Start(runCtx)
+			if policy.BotFilter.Enabled {
+				challengeHook = botManager
+			}
 		}
 	} else {
 		logger.Warn("bot filter disabled: REGIONGATE_CONFIG_FILE is not set")
