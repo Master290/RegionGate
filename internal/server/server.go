@@ -424,6 +424,9 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 	clientConfigurationSent := false
 	queued := false
 	challengeStarted := false
+	challengePassed := false
+	validKeepAlives := 0
+	requiredKeepAlives := 1
 	var challengeResult <-chan error
 	enqueue := func() error {
 		if queued || s.config.AdmissionQueue == nil || s.config.TransferCoordinator == nil {
@@ -436,6 +439,12 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 			return err
 		}
 		queued = true
+		return nil
+	}
+	maybeEnqueue := func() error {
+		if challengePassed && validKeepAlives >= requiredKeepAlives {
+			return enqueue()
+		}
 		return nil
 	}
 	var progress func() error
@@ -489,7 +498,8 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 			if err != nil {
 				return fmt.Errorf("limbo challenge failed: %w", err)
 			}
-			if err := enqueue(); err != nil {
+			challengePassed = true
+			if err := maybeEnqueue(); err != nil {
 				return err
 			}
 		case request := <-admissions:
@@ -553,13 +563,23 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 					return play.ErrMalformed
 				}
 				pendingKeepAlive = 0
+				validKeepAlives++
 				if !challengeStarted {
 					challengeStarted = true
 					if s.config.ChallengeHook == nil {
-						if err := enqueue(); err != nil {
+						challengePassed = true
+						if err := maybeEnqueue(); err != nil {
 							return err
 						}
 					} else {
+						if requirements, ok := s.config.ChallengeHook.(interface {
+							RequiredKeepAlives(forwarding.PlayerIdentity) int
+						}); ok {
+							requiredKeepAlives = requirements.RequiredKeepAlives(identity)
+							if requiredKeepAlives < 1 {
+								requiredKeepAlives = 1
+							}
+						}
 						result := make(chan error, 1)
 						challengeResult = result
 						go func() {
@@ -568,6 +588,9 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 							result <- s.config.ChallengeHook.Verify(ctx, identity)
 						}()
 					}
+				}
+				if err := maybeEnqueue(); err != nil {
+					return err
 				}
 				if !timeout.Stop() {
 					select {

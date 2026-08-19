@@ -144,6 +144,7 @@ type Manager struct {
 	observed atomic.Uint64
 	denied   atomic.Uint64
 	reloads  atomic.Uint64
+	active   atomic.Uint64
 }
 
 func New(policy Policy, path string) *Manager {
@@ -221,6 +222,7 @@ func (m *Manager) Evaluate(_ context.Context, evidence Evidence) Decision {
 	}
 	if len(entry.Attempts) >= policy.Signals.SoftLoginBurst || len(entry.Usernames) >= policy.Signals.UsernameChurn {
 		m.observed.Add(1)
+		m.active.Add(1)
 		return Decision{Verdict: Observe, ObserveFor: policy.Observation.Hold, RuleID: "soft_burst"}
 	}
 	m.allowed.Add(1)
@@ -268,15 +270,8 @@ func (m *Manager) prune(entry *reputation, now time.Time, policy FilterPolicy) {
 func (m *Manager) Metrics() Metrics {
 	m.mu.Lock()
 	entries := uint64(len(m.entries))
-	active := uint64(0)
-	now := time.Now()
-	for _, entry := range m.entries {
-		if entry.BlockedUntil.After(now) {
-			active++
-		}
-	}
 	m.mu.Unlock()
-	return Metrics{Allowed: m.allowed.Load(), Observed: m.observed.Load(), Denied: m.denied.Load(), ActiveObservations: active, ReputationEntries: entries, ReloadFailures: m.reloads.Load()}
+	return Metrics{Allowed: m.allowed.Load(), Observed: m.observed.Load(), Denied: m.denied.Load(), ActiveObservations: m.active.Load(), ReputationEntries: entries, ReloadFailures: m.reloads.Load()}
 }
 
 func (m *Manager) Verify(ctx context.Context, identity forwarding.PlayerIdentity) error {
@@ -285,6 +280,7 @@ func (m *Manager) Verify(ctx context.Context, identity forwarding.PlayerIdentity
 		return errors.New("connection verification failed")
 	}
 	if decision.Verdict == Observe {
+		defer m.active.Add(^uint64(0))
 		timer := time.NewTimer(decision.ObserveFor)
 		defer timer.Stop()
 		select {
@@ -294,4 +290,15 @@ func (m *Manager) Verify(ctx context.Context, identity forwarding.PlayerIdentity
 		}
 	}
 	return nil
+}
+
+// RequiredKeepAlives returns the minimum number of valid Limbo responses
+// required before admission can begin while this policy is enabled.
+func (m *Manager) RequiredKeepAlives(_ forwarding.PlayerIdentity) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.policy.BotFilter.Enabled {
+		return 1
+	}
+	return m.policy.BotFilter.Observation.RequiredKeepAlives
 }
