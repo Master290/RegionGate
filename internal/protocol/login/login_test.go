@@ -94,3 +94,11 @@ func TestEncryptionResponseRejectsTrailingData(t *testing.T) {
 		t.Fatal("trailing encryption response data was accepted")
 	}
 }
+
+func TestParseDisconnectReason(t *testing.T) {
+	payload := codec.AppendVarInt(nil, 0x00)
+	payload = codec.AppendString(payload, `{"text":"Connection throttle"}`)
+	if got := ParseDisconnectReason(payload); got != "Connection throttle" {
+		t.Fatalf("reason=%q", got)
+	}
+}

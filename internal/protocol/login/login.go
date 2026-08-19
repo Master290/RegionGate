@@ -3,6 +3,7 @@ package login
 import (
 	"crypto/md5"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"unicode/utf8"
 
@@ -180,6 +181,26 @@ func ParseAcknowledged(payload []byte) error {
 		return ErrMalformed
 	}
 	return nil
+}
+
+// ParseDisconnectReason extracts a useful, bounded text reason from a Login
+// Disconnect packet without exposing the full backend JSON to callers.
+func ParseDisconnectReason(payload []byte) string {
+	id, body, err := codec.PacketID(payload)
+	if err != nil || id != 0x00 {
+		return ""
+	}
+	message, used, err := codec.ConsumeString(body, 32767)
+	if err != nil || used != len(body) {
+		return ""
+	}
+	var component struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal([]byte(message), &component) == nil && component.Text != "" {
+		return component.Text
+	}
+	return message
 }
 
 func SuccessPayload(username string) []byte {

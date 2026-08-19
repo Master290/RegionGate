@@ -27,6 +27,7 @@ type Config struct {
 	AdmissionInterval   time.Duration
 	LoginRateLimit      int
 	LoginRateWindow     time.Duration
+	BotFilterConfigFile string
 }
 
 func LoadConfig() (Config, error) { return loadConfig(os.Getenv) }
@@ -50,6 +51,7 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		AdmissionInterval:   time.Second,
 		LoginRateLimit:      10,
 		LoginRateWindow:     10 * time.Second,
+		BotFilterConfigFile: getenv("REGIONGATE_CONFIG_FILE"),
 	}
 	var err error
 	if config.AdminToken != "" && len(config.AdminToken) < 32 {

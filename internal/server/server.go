@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Master290/RegionGate/internal/auth"
+	"github.com/Master290/RegionGate/internal/botfilter"
 	"github.com/Master290/RegionGate/internal/bridge"
 	"github.com/Master290/RegionGate/internal/challenge"
 	"github.com/Master290/RegionGate/internal/forwarding"
@@ -46,6 +47,7 @@ type Config struct {
 	LoginRateWindow     time.Duration
 	ChallengeHook       challenge.Hook
 	ChallengeTimeout    time.Duration
+	BotFilter           *botfilter.Manager
 	OnlineAuthenticator *auth.Authenticator
 }
 
@@ -76,6 +78,7 @@ type MetricsSnapshot struct {
 	LoginRateLimited   uint64
 	BackendHealthState uint64
 	BackendConfigured  bool
+	BotFilter          botfilter.Metrics
 }
 
 type admissionRequest struct {
@@ -315,13 +318,16 @@ func readClientConfiguration(client *transport.Transport) error {
 		}
 		id, _, err := codec.PacketID(frame)
 		if err != nil {
-			return configuration.ErrMalformed
+			return fmt.Errorf("malformed configuration packet: invalid frame: %w", err)
 		}
 		if id == configuration.ServerboundFinishConfigurationID {
-			return configuration.ParseFinishAcknowledged(frame)
+			if err := configuration.ParseFinishAcknowledged(frame); err != nil {
+				return fmt.Errorf("malformed configuration packet id=%d: %w", id, err)
+			}
+			return nil
 		}
 		if err := configuration.ParseClientSetup(frame); err != nil {
-			return err
+			return fmt.Errorf("malformed configuration packet id=%d: %w", id, err)
 		}
 	}
 	return configuration.ErrMalformed
@@ -806,6 +812,10 @@ func (s *Server) Metrics() MetricsSnapshot {
 	queue := 0
 	backendHealth := uint64(0)
 	backendConfigured := s.config.TransferCoordinator != nil
+	botMetrics := botfilter.Metrics{}
+	if s.config.BotFilter != nil {
+		botMetrics = s.config.BotFilter.Metrics()
+	}
 	if s.config.AdmissionQueue != nil {
 		queue = s.config.AdmissionQueue.Len()
 	}
@@ -823,6 +833,7 @@ func (s *Server) Metrics() MetricsSnapshot {
 		LoginRateLimited:   s.rateLimited.Load(),
 		BackendHealthState: backendHealth,
 		BackendConfigured:  backendConfigured,
+		BotFilter:          botMetrics,
 	}
 }
 

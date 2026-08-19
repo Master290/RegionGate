@@ -86,7 +86,11 @@ func CompleteLogin(ctx context.Context, backend *transport.Transport, forwarder 
 			_ = backend.SetWriteDeadline(time.Time{})
 			return LoginResult{UUID: uid, Username: username}, nil
 		case clientboundDisconnectID:
-			return LoginResult{}, ErrBackendDisconnected
+			reason := login.ParseDisconnectReason(frame)
+			if reason == "" {
+				return LoginResult{}, ErrBackendDisconnected
+			}
+			return LoginResult{}, fmt.Errorf("%w: %s", ErrBackendDisconnected, reason)
 		case clientboundEncryptionRequestID:
 			return LoginResult{}, ErrUnsupportedEncryption
 		case clientboundSetCompressionID:

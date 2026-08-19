@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/Master290/RegionGate/internal/auth"
 	"github.com/Master290/RegionGate/internal/backend"
+	"github.com/Master290/RegionGate/internal/botfilter"
+	"github.com/Master290/RegionGate/internal/challenge"
 	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/protocol/handshake"
 	"github.com/Master290/RegionGate/internal/protocol/status"
@@ -29,6 +32,21 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	var coordinator *transfer.Coordinator
 	var fifo *admissionqueue.FIFO
 	var onlineAuthenticator *auth.Authenticator
+	var botManager *botfilter.Manager
+	var challengeHook challenge.Hook
+	if config.BotFilterConfigFile != "" {
+		policy, err := botfilter.LoadFile(config.BotFilterConfigFile)
+		if err != nil {
+			return fmt.Errorf("load bot filter policy: %w", err)
+		}
+		botManager = botfilter.New(policy, config.BotFilterConfigFile)
+		botManager.Start(runCtx)
+		if policy.BotFilter.Enabled {
+			challengeHook = botManager
+		}
+	} else {
+		logger.Warn("bot filter disabled: REGIONGATE_CONFIG_FILE is not set")
+	}
 	if config.OnlineMode {
 		var err error
 		onlineAuthenticator, err = auth.NewAuthenticator(auth.SessionService{URL: config.SessionServerURL})
@@ -53,6 +71,8 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		TransferCoordinator: coordinator,
 		AdmissionQueue:      fifo,
 		OnlineAuthenticator: onlineAuthenticator,
+		BotFilter:           botManager,
+		ChallengeHook:       challengeHook,
 		Status: status.Response{
 			Version:     status.Version{Name: "1.20.4", Protocol: handshake.ProtocolVersion},
 			Players:     status.Players{Max: config.MaxConnections},
@@ -174,6 +194,19 @@ func metricsHandler(gateway *server.Server) http.Handler {
 			{"regiongate_backend_health_state", metrics.BackendHealthState},
 		}
 		for _, metric := range values {
+			_, _ = response.Write([]byte(metric.name + " " + strconv.FormatUint(metric.value, 10) + "\n"))
+		}
+		for _, metric := range []struct {
+			name  string
+			value uint64
+		}{
+			{"regiongate_botfilter_allowed_total", metrics.BotFilter.Allowed},
+			{"regiongate_botfilter_observed_total", metrics.BotFilter.Observed},
+			{"regiongate_botfilter_denied_total", metrics.BotFilter.Denied},
+			{"regiongate_botfilter_active_observations", metrics.BotFilter.ActiveObservations},
+			{"regiongate_botfilter_reputation_entries", metrics.BotFilter.ReputationEntries},
+			{"regiongate_botfilter_reload_failures_total", metrics.BotFilter.ReloadFailures},
+		} {
 			_, _ = response.Write([]byte(metric.name + " " + strconv.FormatUint(metric.value, 10) + "\n"))
 		}
 	})

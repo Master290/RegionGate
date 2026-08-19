@@ -10,15 +10,28 @@ if (!Number.isInteger(count) || count < 1 || count > 16) {
 }
 
 const bots = []
+const settled = new Set()
 let spawned = 0
 let failed = false
 let finishing = false
+let completed = 0
 
 function finish(code) {
   if (finishing) return
   finishing = true
   for (const bot of bots) bot.quit('Smoke test complete')
   setTimeout(() => process.exit(code), 500)
+}
+
+function maybeFinish() {
+  if (completed === count) finish(failed ? 1 : 0)
+}
+
+function settle(username) {
+  if (settled.has(username)) return
+  settled.add(username)
+  completed++
+  maybeFinish()
 }
 
 for (let index = 1; index <= count; index++) {
@@ -44,20 +57,20 @@ for (let index = 1; index <= count; index++) {
   bot.on('kicked', reason => {
     failed = true
     console.error(`${username}: kicked: ${reason}`)
-    finish(1)
+    settle(username)
   })
 
   bot.on('error', error => {
     failed = true
     console.error(`${username}: error: ${error.message}`)
-    finish(1)
+    settle(username)
   })
 
   bot.on('end', reason => {
     if (!finishing) {
       failed = true
       console.error(`${username}: disconnected early: ${reason}`)
-      finish(1)
+      settle(username)
     }
   })
 }

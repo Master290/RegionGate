@@ -15,6 +15,7 @@ services:
       REGIONGATE_MAX_CONNECTIONS_PER_IP: ${REGIONGATE_MAX_CONNECTIONS_PER_IP:-8}
       REGIONGATE_LOGIN_RATE_LIMIT: ${REGIONGATE_LOGIN_RATE_LIMIT:-10}
       REGIONGATE_LOGIN_RATE_WINDOW: ${REGIONGATE_LOGIN_RATE_WINDOW:-10s}
+      REGIONGATE_CONFIG_FILE: ${REGIONGATE_CONFIG_FILE:-}
     ports:
       - "${REGIONGATE_BIND_ADDRESS:-0.0.0.0}:${REGIONGATE_PORT:-25565}:25565/tcp"
     expose:
@@ -31,6 +32,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
+    volumes:
+      - ./config/botfilter.example.yaml:/etc/regiongate/botfilter.example.yaml:ro
     cap_drop:
       - ALL
     security_opt:
@@ -62,6 +65,7 @@ services:
       start_period: 60s
     volumes:
       - paper-data:/data
+      - ./config/paper/bukkit.yml:/data/bukkit.yml:rw
     mem_limit: ${PAPER_MEMORY_LIMIT:-3g}
     cpus: ${PAPER_CPU_LIMIT:-2.0}
     networks:

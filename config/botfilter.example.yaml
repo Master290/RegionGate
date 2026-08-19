@@ -1,0 +1,16 @@
+version: 1
+bot_filter:
+  enabled: true
+  observation:
+    hold: 10s
+    keepalive_interval: 3s
+    required_keepalives: 2
+  reputation:
+    window: 5m
+    violation_limit: 3
+    deny_ttl: 10m
+  signals:
+    soft_login_burst: 4
+    burst_window: 10s
+    username_churn: 6
+    churn_window: 1m

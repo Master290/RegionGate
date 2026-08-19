@@ -226,6 +226,11 @@ Optional variables include `REGIONGATE_LISTEN`, `REGIONGATE_HEALTH_LISTEN`,
 Login throttling is configured with `REGIONGATE_LOGIN_RATE_LIMIT` and
 `REGIONGATE_LOGIN_RATE_WINDOW`.
 
+The optional local bot filter is enabled by setting
+`REGIONGATE_CONFIG_FILE=/etc/regiongate/botfilter.example.yaml` (or another
+mounted policy file). Without this variable, the gateway logs a warning and
+keeps the filter disabled. Policy reloads are picked up automatically.
+
 Profiling is disabled unless `REGIONGATE_PPROF_LISTEN` is set. Bind it to a
 private address, then use the standard Go tools:
 
