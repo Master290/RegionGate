@@ -1,0 +1,12 @@
+{
+  "name": "regiongate-mineflayer-smoke",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Concurrent Minecraft 1.20.4 smoke clients for RegionGate",
+  "scripts": {
+    "smoke": "node smoke.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.32.0"
+  }
+}
