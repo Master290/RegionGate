@@ -55,3 +55,34 @@ func TestDisabledPolicyAllows(t *testing.T) {
 		t.Fatalf("decision=%+v", decision)
 	}
 }
+
+func TestBurstWindowExpiresIndependentlyOfReputationWindow(t *testing.T) {
+	p := enabledPolicy()
+	p.BotFilter.Signals.SoftLoginBurst = 2
+	p.BotFilter.Signals.BurstWindow = 20 * time.Millisecond
+	p.BotFilter.Reputation.Window = time.Minute
+	m := New(p, "")
+	identity := forwarding.PlayerIdentity{Address: "198.51.100.11", Username: "player"}
+
+	if got := m.Evaluate(context.Background(), Evidence{Identity: identity, RemoteIP: identity.Address}).Verdict; got != Allow {
+		t.Fatalf("first verdict=%v", got)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if got := m.Evaluate(context.Background(), Evidence{Identity: identity, RemoteIP: identity.Address}).Verdict; got != Allow {
+		t.Fatalf("expired burst verdict=%v", got)
+	}
+}
+
+func TestObservationSettingsAreExposedToServer(t *testing.T) {
+	p := enabledPolicy()
+	p.BotFilter.Observation.RequiredKeepAlives = 3
+	p.BotFilter.Observation.KeepAliveInterval = 25 * time.Millisecond
+	m := New(p, "")
+	identity := forwarding.PlayerIdentity{Address: "198.51.100.12"}
+	if got := m.RequiredKeepAlives(identity); got != 3 {
+		t.Fatalf("required keepalives=%d", got)
+	}
+	if got := m.KeepAliveInterval(identity); got != 25*time.Millisecond {
+		t.Fatalf("keepalive interval=%s", got)
+	}
+}

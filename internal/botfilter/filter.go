@@ -119,10 +119,10 @@ func (p Policy) Validate() error {
 }
 
 type reputation struct {
-	Attempts     []time.Time
-	Usernames    map[string]time.Time
-	Violations   []time.Time
-	BlockedUntil time.Time
+	BurstAttempts []time.Time
+	Usernames     map[string]time.Time
+	Violations    []time.Time
+	BlockedUntil  time.Time
 }
 
 type Metrics struct {
@@ -216,11 +216,11 @@ func (m *Manager) Evaluate(_ context.Context, evidence Evidence) Decision {
 		m.denied.Add(1)
 		return Decision{Verdict: Deny, RuleID: "protocol_violation"}
 	}
-	entry.Attempts = append(entry.Attempts, now)
+	entry.BurstAttempts = append(entry.BurstAttempts, now)
 	if evidence.Identity.Username != "" {
 		entry.Usernames[evidence.Identity.Username] = now
 	}
-	if len(entry.Attempts) >= policy.Signals.SoftLoginBurst || len(entry.Usernames) >= policy.Signals.UsernameChurn {
+	if len(entry.BurstAttempts) >= policy.Signals.SoftLoginBurst || len(entry.Usernames) >= policy.Signals.UsernameChurn {
 		m.observed.Add(1)
 		m.active.Add(1)
 		return Decision{Verdict: Observe, ObserveFor: policy.Observation.Hold, RuleID: "soft_burst"}
@@ -250,16 +250,15 @@ func (m *Manager) recordViolation(entry *reputation, now time.Time, policy Filte
 }
 
 func (m *Manager) prune(entry *reputation, now time.Time, policy FilterPolicy) {
-	cutoff := now.Add(-policy.Reputation.Window)
-	keepTimes := func(values []time.Time) []time.Time {
+	keepTimes := func(values []time.Time, cutoff time.Time) []time.Time {
 		index := 0
 		for index < len(values) && values[index].Before(cutoff) {
 			index++
 		}
 		return values[index:]
 	}
-	entry.Attempts = keepTimes(entry.Attempts)
-	entry.Violations = keepTimes(entry.Violations)
+	entry.BurstAttempts = keepTimes(entry.BurstAttempts, now.Add(-policy.Signals.BurstWindow))
+	entry.Violations = keepTimes(entry.Violations, now.Add(-policy.Reputation.Window))
 	for username, at := range entry.Usernames {
 		if at.Before(now.Add(-policy.Signals.ChurnWindow)) {
 			delete(entry.Usernames, username)
@@ -301,4 +300,16 @@ func (m *Manager) RequiredKeepAlives(_ forwarding.PlayerIdentity) int {
 		return 1
 	}
 	return m.policy.BotFilter.Observation.RequiredKeepAlives
+}
+
+// KeepAliveInterval returns the interval used while a player is being
+// observed by the bot filter. A disabled policy leaves the server default in
+// control of the session keep-alive schedule.
+func (m *Manager) KeepAliveInterval(_ forwarding.PlayerIdentity) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.policy.BotFilter.Enabled {
+		return 0
+	}
+	return m.policy.BotFilter.Observation.KeepAliveInterval
 }

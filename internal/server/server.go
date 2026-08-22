@@ -580,6 +580,13 @@ func (s *Server) serveLimbo(client *transport.Transport, state *session.Session,
 								requiredKeepAlives = 1
 							}
 						}
+						if intervals, ok := s.config.ChallengeHook.(interface {
+							KeepAliveInterval(forwarding.PlayerIdentity) time.Duration
+						}); ok {
+							if interval := intervals.KeepAliveInterval(identity); interval > 0 {
+								ticker.Reset(interval)
+							}
+						}
 						result := make(chan error, 1)
 						challengeResult = result
 						go func() {
