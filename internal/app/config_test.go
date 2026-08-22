@@ -3,16 +3,21 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Master290/RegionGate/internal/backend"
+	"github.com/Master290/RegionGate/internal/forwarding"
 	"github.com/Master290/RegionGate/internal/server"
+	"github.com/Master290/RegionGate/internal/transfer"
 )
 
 func TestLoadConfigDefaultsAndBackendValidation(t *testing.T) {
@@ -209,6 +214,46 @@ func TestMetricsAndAdminStatusExposeGatewaySnapshot(t *testing.T) {
 	}
 	if adminResponse.Code != 200 || snapshot.Sessions != 0 {
 		t.Fatalf("admin status=%d snapshot=%+v", adminResponse.Code, snapshot)
+	}
+}
+
+func TestReadinessBackendStates(t *testing.T) {
+	testCases := []struct {
+		name       string
+		configured bool
+		state      backend.HealthState
+		wantReady  bool
+		wantStatus int
+	}{
+		{name: "backend disabled", wantReady: true, wantStatus: http.StatusOK},
+		{name: "backend unknown", configured: true, state: backend.HealthUnknown, wantReady: true, wantStatus: http.StatusOK},
+		{name: "backend healthy", configured: true, state: backend.HealthHealthy, wantReady: true, wantStatus: http.StatusOK},
+		{name: "backend unhealthy", configured: true, state: backend.HealthUnhealthy, wantReady: false, wantStatus: http.StatusServiceUnavailable},
+	}
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			gateway := server.New(server.Config{}, nil)
+			if test.configured {
+				dialer := backend.NewDialer(backend.Config{Address: "127.0.0.1:25566"})
+				forwarder, err := forwarding.NewModernForwarding([]byte("readiness-test-secret"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				coordinator := transfer.NewCoordinator(dialer, forwarder, transfer.Config{})
+				gateway = server.New(server.Config{TransferCoordinator: coordinator}, nil)
+				switch test.state {
+				case backend.HealthHealthy:
+					dialer.MarkHealthy()
+				case backend.HealthUnhealthy:
+					dialer.MarkUnhealthy(errors.New("backend unavailable"))
+				}
+			}
+			response := httptest.NewRecorder()
+			healthHandler(gateway, "").ServeHTTP(response, httptest.NewRequest("GET", "/readyz", nil))
+			if response.Code != test.wantStatus || !strings.Contains(response.Body.String(), `"ready":`+strconv.FormatBool(test.wantReady)) {
+				t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

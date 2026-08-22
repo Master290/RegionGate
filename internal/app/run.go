@@ -173,7 +173,7 @@ func healthHandler(gateway *server.Server, adminToken string) http.Handler {
 		// A backend is probed during admission, so the initial unknown state must
 		// not prevent the process from becoming ready. Explicitly unhealthy is
 		// the only state that should fail readiness.
-		ready := !metrics.BackendConfigured || metrics.BackendHealthState != 2
+		ready := !metrics.BackendConfigured || metrics.BackendHealthState != uint64(backend.HealthUnhealthy)
 		response.Header().Set("Content-Type", "application/json")
 		if !ready {
 			response.WriteHeader(http.StatusServiceUnavailable)

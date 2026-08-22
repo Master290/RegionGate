@@ -207,6 +207,11 @@ Health:    127.0.0.1:8080/healthz
 Readiness: 127.0.0.1:8080/readyz
 ```
 
+`/readyz` returns HTTP 200 when no backend is configured, while the backend
+health state is unknown, or after a successful backend transfer. It returns
+HTTP 503 only after an explicit backend failure is recorded; the initial
+unknown state does not block process startup.
+
 Backend transfer is enabled when both variables are configured:
 
 ```text
