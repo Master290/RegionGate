@@ -96,3 +96,31 @@ func TestSchedulerSkipsCanceledItem(t *testing.T) {
 		t.Fatal("canceled item was not removed")
 	}
 }
+
+func TestRemovalClearsBackingArrayReferences(t *testing.T) {
+	q := New(2)
+	callback := func(context.Context) error { return nil }
+	if _, err := q.Enqueue(Item{ID: "a", Context: context.Background(), Admit: callback}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue(Item{ID: "b", Context: context.Background(), Admit: callback}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := q.Pop(); !ok {
+		t.Fatal("expected queued item")
+	}
+	if len(q.items) != 1 || q.items[0].ID != "b" {
+		t.Fatalf("items after pop=%+v", q.items)
+	}
+	cleared := q.items[:cap(q.items)][1]
+	if cleared.ID != "" || cleared.Context != nil || cleared.Admit != nil {
+		t.Fatal("popped item was retained in backing array")
+	}
+	if !q.Cancel("b") {
+		t.Fatal("expected second item cancellation")
+	}
+	cleared = q.items[:cap(q.items)][0]
+	if len(q.items) != 0 || cleared.ID != "" || cleared.Context != nil || cleared.Admit != nil {
+		t.Fatal("canceled item was retained in backing array")
+	}
+}

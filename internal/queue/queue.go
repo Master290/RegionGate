@@ -60,7 +60,9 @@ func (q *FIFO) Cancel(id string) bool {
 			continue
 		}
 		copy(q.items[index:], q.items[index+1:])
-		q.items = q.items[:len(q.items)-1]
+		last := len(q.items) - 1
+		q.items[last] = Item{}
+		q.items = q.items[:last]
 		delete(q.queued, id)
 		return true
 	}
@@ -75,7 +77,9 @@ func (q *FIFO) Pop() (Item, bool) {
 	}
 	item := q.items[0]
 	copy(q.items, q.items[1:])
-	q.items = q.items[:len(q.items)-1]
+	last := len(q.items) - 1
+	q.items[last] = Item{}
+	q.items = q.items[:last]
 	delete(q.queued, item.ID)
 	return item, true
 }
