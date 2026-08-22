@@ -120,7 +120,8 @@ internal/session/                Session state and transfer barrier
 
 Requirements:
 
-- Go `1.26` or newer.
+- Go `1.26` or newer. Use the latest available patch release; security fixes
+  are applied in patch releases and CI tracks `1.26.x`.
 - Git.
 
 Run all tests:
@@ -134,6 +135,16 @@ Run static analysis:
 ```bash
 go vet ./...
 ```
+
+Run the Go vulnerability scanner:
+
+```bash
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+```
+
+The scheduled GitHub Actions `Security` workflow runs this scan against the
+current Go `1.26.x` patch release. An older local toolchain may report standard
+library vulnerabilities that are already fixed in a newer patch release.
 
 Format the code:
 
