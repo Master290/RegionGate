@@ -1,4 +1,4 @@
-# # <p><img src="https://remo.su/regiongate-full.svg" height="60"></p>
+# <p><img src="https://remo.su/regiongate-full.svg" height="60"></p>
 
 RegionGate is a high-performance, lightweight Minecraft proxy and Limbo gateway written in Go. It is designed for anti-bot protection, player queues, backend routing, and low-latency traffic forwarding without JVM overhead.
 
