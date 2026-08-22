@@ -95,6 +95,21 @@ func TestPrepareRejectsUnconfiguredCoordinatorWithoutMutatingSession(t *testing.
 	}
 }
 
+func TestCoordinatorKeepsDefaultBarrierTimeoutLocal(t *testing.T) {
+	coordinator := &Coordinator{config: Config{}}
+	if coordinator.config.BarrierTimeout != 0 {
+		t.Fatalf("initial barrier timeout=%s", coordinator.config.BarrierTimeout)
+	}
+	// Prepare computes the default per call; the shared coordinator config is
+	// intentionally left immutable so concurrent admissions cannot race on it.
+	if _, err := coordinator.Prepare(context.Background(), session.New(), forwarding.PlayerIdentity{}, nil); err == nil {
+		t.Fatal("unconfigured coordinator unexpectedly prepared a transfer")
+	}
+	if coordinator.config.BarrierTimeout != 0 {
+		t.Fatalf("coordinator barrier timeout mutated to %s", coordinator.config.BarrierTimeout)
+	}
+}
+
 func TestPreparedLifecycleRequiresClientAcknowledgement(t *testing.T) {
 	state := sessionAtAwaitingClientConfiguration(t)
 	left, right := net.Pipe()

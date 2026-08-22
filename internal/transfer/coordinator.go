@@ -59,8 +59,9 @@ func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, ident
 	if c.dialer == nil || c.forwarder == nil {
 		return nil, errors.New("transfer coordinator is not configured")
 	}
-	if c.config.BarrierTimeout <= 0 {
-		c.config.BarrierTimeout = 30 * time.Second
+	barrierTimeout := c.config.BarrierTimeout
+	if barrierTimeout <= 0 {
+		barrierTimeout = 30 * time.Second
 	}
 	if err := state.BeginTransfer(time.Now(), oldKeepAlives, c.config.MaxPendingCommands); err != nil {
 		return nil, err
@@ -100,7 +101,7 @@ func (c *Coordinator) Prepare(ctx context.Context, state *session.Session, ident
 		return rollback(err, backendConn)
 	}
 	prepared := &Prepared{session: state, backend: backendConn, packets: configuration.Packets, done: make(chan struct{})}
-	go prepared.timeout(c.config.BarrierTimeout)
+	go prepared.timeout(barrierTimeout)
 	return prepared, nil
 }
 
