@@ -98,6 +98,53 @@ func TestLoadConfigLoginRateLimit(t *testing.T) {
 	}
 }
 
+func TestLoadConfigSessionLimits(t *testing.T) {
+	values := map[string]string{
+		"REGIONGATE_MAX_PACKET_SIZE":       "1048576",
+		"REGIONGATE_HANDSHAKE_TIMEOUT":     "2s",
+		"REGIONGATE_STATUS_TIMEOUT":        "3s",
+		"REGIONGATE_LOGIN_TIMEOUT":         "4s",
+		"REGIONGATE_WRITE_TIMEOUT":         "5s",
+		"REGIONGATE_KEEPALIVE_INTERVAL":    "6s",
+		"REGIONGATE_KEEPALIVE_TIMEOUT":     "7s",
+		"REGIONGATE_QUEUE_STATUS_INTERVAL": "8s",
+		"REGIONGATE_CHALLENGE_TIMEOUT":     "9s",
+	}
+	config, err := loadConfig(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.MaxPacketSize != 1048576 || config.HandshakeTimeout != 2*time.Second || config.StatusTimeout != 3*time.Second || config.LoginTimeout != 4*time.Second || config.WriteTimeout != 5*time.Second || config.KeepAliveInterval != 6*time.Second || config.KeepAliveTimeout != 7*time.Second || config.QueueStatusInterval != 8*time.Second || config.ChallengeTimeout != 9*time.Second {
+		t.Fatalf("config=%+v", config)
+	}
+}
+
+func TestLoadConfigRejectsInvalidSessionLimit(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "packet size", value: "0"},
+		{name: "login timeout", value: "invalid"},
+		{name: "keepalive timeout", value: "0s"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			values := map[string]string{}
+			switch test.name {
+			case "packet size":
+				values["REGIONGATE_MAX_PACKET_SIZE"] = test.value
+			case "login timeout":
+				values["REGIONGATE_LOGIN_TIMEOUT"] = test.value
+			case "keepalive timeout":
+				values["REGIONGATE_KEEPALIVE_TIMEOUT"] = test.value
+			}
+			if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
+				t.Fatal("invalid session limit was accepted")
+			}
+		})
+	}
+}
+
 func TestHealthHandlerReportsSessionCount(t *testing.T) {
 	request := httptest.NewRequest("GET", "/healthz", nil)
 	response := httptest.NewRecorder()

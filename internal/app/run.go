@@ -72,7 +72,10 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 
 	gateway := server.New(server.Config{
 		MaxConnections: config.MaxConnections, MaxConnectionsPerIP: config.MaxConnectionsPerIP, MaxPacketSize: config.MaxPacketSize,
+		HandshakeTimeout: config.HandshakeTimeout, StatusTimeout: config.StatusTimeout, LoginTimeout: config.LoginTimeout,
+		WriteTimeout:      config.WriteTimeout,
 		KeepAliveInterval: config.KeepAliveInterval, KeepAliveTimeout: config.KeepAliveTimeout,
+		QueueStatusInterval: config.QueueStatusInterval, ChallengeTimeout: config.ChallengeTimeout,
 		LoginRateLimit: config.LoginRateLimit, LoginRateWindow: config.LoginRateWindow,
 		TransferCoordinator: coordinator,
 		AdmissionQueue:      fifo,

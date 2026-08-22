@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/Master290/RegionGate/internal/protocol/codec"
 )
 
 type Config struct {
@@ -21,10 +23,16 @@ type Config struct {
 	MaxConnections      int
 	MaxConnectionsPerIP int
 	MaxPacketSize       int
+	HandshakeTimeout    time.Duration
+	StatusTimeout       time.Duration
+	LoginTimeout        time.Duration
+	WriteTimeout        time.Duration
 	KeepAliveInterval   time.Duration
 	KeepAliveTimeout    time.Duration
 	QueueSize           int
 	AdmissionInterval   time.Duration
+	QueueStatusInterval time.Duration
+	ChallengeTimeout    time.Duration
 	LoginRateLimit      int
 	LoginRateWindow     time.Duration
 	BotFilterConfigFile string
@@ -45,10 +53,17 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		SessionServerURL:    getenv("REGIONGATE_SESSION_SERVER_URL"),
 		MaxConnections:      10000,
 		MaxConnectionsPerIP: 16,
+		MaxPacketSize:       codec.DefaultMaxPacketSize,
+		HandshakeTimeout:    10 * time.Second,
+		StatusTimeout:       10 * time.Second,
+		LoginTimeout:        30 * time.Second,
+		WriteTimeout:        10 * time.Second,
 		KeepAliveInterval:   15 * time.Second,
 		KeepAliveTimeout:    30 * time.Second,
 		QueueSize:           1024,
 		AdmissionInterval:   time.Second,
+		QueueStatusInterval: time.Second,
+		ChallengeTimeout:    10 * time.Second,
 		LoginRateLimit:      10,
 		LoginRateWindow:     10 * time.Second,
 		BotFilterConfigFile: getenv("REGIONGATE_CONFIG_FILE"),
@@ -71,6 +86,29 @@ func loadConfig(getenv func(string) string) (Config, error) {
 	}
 	if config.MaxConnectionsPerIP, err = intValue(getenv("REGIONGATE_MAX_CONNECTIONS_PER_IP"), config.MaxConnectionsPerIP); err != nil || config.MaxConnectionsPerIP <= 0 {
 		return Config{}, errors.New("REGIONGATE_MAX_CONNECTIONS_PER_IP must be positive")
+	}
+	if config.MaxPacketSize, err = intValue(getenv("REGIONGATE_MAX_PACKET_SIZE"), config.MaxPacketSize); err != nil || config.MaxPacketSize <= 0 {
+		return Config{}, errors.New("REGIONGATE_MAX_PACKET_SIZE must be positive")
+	}
+	for _, setting := range []struct {
+		name   string
+		target *time.Duration
+	}{
+		{name: "REGIONGATE_HANDSHAKE_TIMEOUT", target: &config.HandshakeTimeout},
+		{name: "REGIONGATE_STATUS_TIMEOUT", target: &config.StatusTimeout},
+		{name: "REGIONGATE_LOGIN_TIMEOUT", target: &config.LoginTimeout},
+		{name: "REGIONGATE_WRITE_TIMEOUT", target: &config.WriteTimeout},
+		{name: "REGIONGATE_KEEPALIVE_INTERVAL", target: &config.KeepAliveInterval},
+		{name: "REGIONGATE_KEEPALIVE_TIMEOUT", target: &config.KeepAliveTimeout},
+		{name: "REGIONGATE_QUEUE_STATUS_INTERVAL", target: &config.QueueStatusInterval},
+		{name: "REGIONGATE_CHALLENGE_TIMEOUT", target: &config.ChallengeTimeout},
+	} {
+		if value := getenv(setting.name); value != "" {
+			*setting.target, err = time.ParseDuration(value)
+			if err != nil || *setting.target <= 0 {
+				return Config{}, errors.New(setting.name + " must be a positive duration")
+			}
+		}
 	}
 	if config.QueueSize, err = intValue(getenv("REGIONGATE_QUEUE_SIZE"), config.QueueSize); err != nil || config.QueueSize <= 0 {
 		return Config{}, errors.New("REGIONGATE_QUEUE_SIZE must be positive")
