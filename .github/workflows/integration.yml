@@ -1,0 +1,40 @@
+name: Integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regiongate-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  minecraft-backends:
+    name: ${{ matrix.backend }} forwarding
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: Paper
+            package: paper
+            flag: REGIONGATE_RUN_PAPER_INTEGRATION
+          - backend: Purpur
+            package: purpur
+            flag: REGIONGATE_RUN_PURPUR_INTEGRATION
+          - backend: FabricProxy-Lite
+            package: fabric
+            flag: REGIONGATE_RUN_FABRIC_INTEGRATION
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+      - name: Run ${{ matrix.backend }} integration test
+        run: env "${{ matrix.flag }}=1" go test -tags=integration ./integration/${{ matrix.package }} -v -count=1

@@ -180,6 +180,11 @@ Run the Purpur 1.20.4 integration test:
 REGIONGATE_RUN_PURPUR_INTEGRATION=1 go test -tags=integration ./integration/purpur -v
 ```
 
+The backend forwarding integration tests also run in parallel in the separate
+GitHub Actions `Integration` workflow. It can be started manually from the
+Actions tab and runs weekly on Mondays; the regular CI workflow intentionally
+keeps these Docker-based tests out of pull request checks.
+
 Run the performance baseline with allocation counts:
 
 ```bash
