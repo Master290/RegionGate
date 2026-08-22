@@ -73,6 +73,28 @@ func TestBurstWindowExpiresIndependentlyOfReputationWindow(t *testing.T) {
 	}
 }
 
+func TestChurnWindowExpiresIndependentlyOfReputationWindow(t *testing.T) {
+	p := enabledPolicy()
+	p.BotFilter.Signals.UsernameChurn = 2
+	p.BotFilter.Signals.ChurnWindow = 20 * time.Millisecond
+	p.BotFilter.Reputation.Window = time.Minute
+	m := New(p, "")
+
+	if got := m.Evaluate(context.Background(), Evidence{
+		Identity: forwarding.PlayerIdentity{Address: "198.51.100.13", Username: "first"},
+		RemoteIP: "198.51.100.13",
+	}).Verdict; got != Allow {
+		t.Fatalf("first username verdict=%v", got)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if got := m.Evaluate(context.Background(), Evidence{
+		Identity: forwarding.PlayerIdentity{Address: "198.51.100.13", Username: "second"},
+		RemoteIP: "198.51.100.13",
+	}).Verdict; got != Allow {
+		t.Fatalf("expired churn verdict=%v", got)
+	}
+}
+
 func TestObservationSettingsAreExposedToServer(t *testing.T) {
 	p := enabledPolicy()
 	p.BotFilter.Observation.RequiredKeepAlives = 3
