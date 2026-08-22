@@ -152,9 +152,6 @@ func New(policy Policy, path string) *Manager {
 }
 
 func (m *Manager) Start(ctx context.Context) {
-	if m.path == "" {
-		return
-	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -163,10 +160,33 @@ func (m *Manager) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				m.reload()
+				m.cleanup()
+				if m.path != "" {
+					m.reload()
+				}
 			}
 		}
 	}()
+}
+
+// cleanup prunes old reputation signals and removes IP entries that no longer
+// carry any usable state. This keeps an IP spray from growing the map without
+// bound between requests.
+func (m *Manager) cleanup() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	policy := m.policy.BotFilter
+	for ip, entry := range m.entries {
+		if !policy.Enabled {
+			delete(m.entries, ip)
+			continue
+		}
+		m.prune(entry, now, policy)
+		if len(entry.BurstAttempts) == 0 && len(entry.Usernames) == 0 && len(entry.Violations) == 0 && !entry.BlockedUntil.After(now) {
+			delete(m.entries, ip)
+		}
+	}
 }
 
 func (m *Manager) reload() {

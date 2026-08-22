@@ -86,3 +86,29 @@ func TestObservationSettingsAreExposedToServer(t *testing.T) {
 		t.Fatalf("keepalive interval=%s", got)
 	}
 }
+
+func TestCleanupRemovesStaleEntries(t *testing.T) {
+	p := enabledPolicy()
+	p.BotFilter.Signals.BurstWindow = time.Minute
+	p.BotFilter.Signals.ChurnWindow = time.Minute
+	p.BotFilter.Reputation.Window = time.Minute
+	m := New(p, "")
+	now := time.Now()
+	m.entries["198.51.100.20"] = &reputation{
+		BurstAttempts: []time.Time{now.Add(-2 * time.Minute)},
+		Usernames:     map[string]time.Time{"old": now.Add(-2 * time.Minute)},
+		Violations:    []time.Time{now.Add(-2 * time.Minute)},
+	}
+	m.entries["198.51.100.21"] = &reputation{
+		BurstAttempts: []time.Time{now},
+		Usernames:     map[string]time.Time{"active": now},
+	}
+
+	m.cleanup()
+	if _, ok := m.entries["198.51.100.20"]; ok {
+		t.Fatal("stale reputation entry was not removed")
+	}
+	if _, ok := m.entries["198.51.100.21"]; !ok {
+		t.Fatal("active reputation entry was removed")
+	}
+}
