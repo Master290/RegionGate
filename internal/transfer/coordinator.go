@@ -148,18 +148,34 @@ func (p *Prepared) ConfigurationPackets() [][]byte {
 // caller must feed the resulting client ACK into AcknowledgeClientStart.
 func (p *Prepared) BeginClientConfiguration(client *transport.Transport) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.finalized {
+		p.mu.Unlock()
 		return ErrTransferAlreadyFinalized
 	}
 	phase, err := p.session.BarrierPhase()
+	p.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	if phase != session.BarrierAwaitingClientConfigurationStart {
 		return session.ErrBarrierNotReady
 	}
-	return client.WriteFrame(play.StartConfigurationPayload())
+	if err := client.WriteFrame(play.StartConfigurationPayload()); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finalized {
+		return ErrTransferAlreadyFinalized
+	}
+	phase, err = p.session.BarrierPhase()
+	if err != nil {
+		return err
+	}
+	if phase != session.BarrierAwaitingClientConfigurationStart {
+		return session.ErrBarrierNotReady
+	}
+	return nil
 }
 
 // WriteClientConfiguration writes backend packets into the existing client
@@ -167,24 +183,41 @@ func (p *Prepared) BeginClientConfiguration(client *transport.Transport) error {
 // be consumed by the session reader before AcknowledgeClientConfiguration.
 func (p *Prepared) WriteClientConfiguration(client *transport.Transport) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.finalized {
+		p.mu.Unlock()
 		return ErrTransferAlreadyFinalized
 	}
 	phase, err := p.session.BarrierPhase()
+	packets := make([][]byte, len(p.packets))
+	for i, packet := range p.packets {
+		packets[i] = append([]byte(nil), packet...)
+	}
+	p.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	if phase != session.BarrierClientConfiguration {
 		return session.ErrBarrierNotReady
 	}
-	for _, packet := range p.packets {
+	for _, packet := range packets {
 		if err := client.WriteFrame(packet); err != nil {
 			return err
 		}
 	}
 	if err := client.WriteFrame(configuration.FinishPayload()); err != nil {
 		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finalized {
+		return ErrTransferAlreadyFinalized
+	}
+	phase, err = p.session.BarrierPhase()
+	if err != nil {
+		return err
+	}
+	if phase != session.BarrierClientConfiguration {
+		return session.ErrBarrierNotReady
 	}
 	return p.session.AdvanceBarrier(session.BarrierAwaitingClientConfigurationFinish)
 }

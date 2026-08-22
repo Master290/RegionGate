@@ -221,6 +221,37 @@ func TestPreparedTimeoutRollsBackAndClosesBackend(t *testing.T) {
 	}
 }
 
+func TestPreparedTimeoutCanFinalizeDuringClientWrite(t *testing.T) {
+	state := sessionAtAwaitingClientConfiguration(t)
+	backendLeft, backendRight := net.Pipe()
+	backendConn := transport.New(backendLeft, 1024)
+	defer backendRight.Close()
+	prepared := &Prepared{session: state, backend: backendConn, done: make(chan struct{})}
+
+	clientLeft, clientRight := net.Pipe()
+	client := transport.New(clientLeft, 1024)
+	defer clientRight.Close()
+	defer client.Close()
+
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- prepared.BeginClientConfiguration(client) }()
+	go prepared.timeout(20 * time.Millisecond)
+	select {
+	case <-prepared.Done():
+	case <-time.After(time.Second):
+		t.Fatal("timeout could not finalize while client write was blocked")
+	}
+	if !errors.Is(prepared.Err(), ErrTransferTimedOut) || state.State() != session.StateLimboPlay {
+		t.Fatalf("state=%s error=%v", state.State(), prepared.Err())
+	}
+	_ = client.Close()
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocked client write did not unblock after close")
+	}
+}
+
 func TestPreparedClientDisconnectRollsBackAndClosesBackend(t *testing.T) {
 	state := sessionAtAwaitingClientConfiguration(t)
 	backendLeft, backendRight := net.Pipe()
