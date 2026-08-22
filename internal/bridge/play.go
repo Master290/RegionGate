@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 	"github.com/Master290/RegionGate/internal/protocol/play"
@@ -29,6 +30,8 @@ func RunPlay(ctx context.Context, clientFrames <-chan ClientFrame, client, backe
 	if config.MaxPendingKeepAlives <= 0 {
 		config.MaxPendingKeepAlives = 16
 	}
+	stopInterrupt := interruptOnDone(ctx, client, backend)
+	defer stopInterrupt()
 	backendFrames := make(chan ClientFrame)
 	backendDone := make(chan struct{})
 	defer close(backendDone)
@@ -53,6 +56,9 @@ func RunPlay(ctx context.Context, clientFrames <-chan ClientFrame, client, backe
 			return ctx.Err()
 		case frame := <-backendFrames:
 			if frame.Err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return fmt.Errorf("read backend play packet: %w", frame.Err)
 			}
 			id, body, err := codec.PacketID(frame.Payload)
@@ -71,6 +77,9 @@ func RunPlay(ctx context.Context, clientFrames <-chan ClientFrame, client, backe
 			}
 		case frame := <-clientFrames:
 			if frame.Err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return fmt.Errorf("read client play packet: %w", frame.Err)
 			}
 			id, _, err := codec.PacketID(frame.Payload)
@@ -92,4 +101,25 @@ func RunPlay(ctx context.Context, clientFrames <-chan ClientFrame, client, backe
 			}
 		}
 	}
+}
+
+func interruptOnDone(ctx context.Context, transports ...*transport.Transport) func() {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	interrupt := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			for _, t := range transports {
+				if t == nil {
+					continue
+				}
+				_ = t.SetReadDeadline(time.Now())
+				_ = t.SetWriteDeadline(time.Now())
+			}
+		case <-interrupt:
+		}
+	}()
+	return func() { close(interrupt) }
 }

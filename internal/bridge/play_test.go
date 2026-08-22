@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/Master290/RegionGate/internal/protocol/codec"
 	"github.com/Master290/RegionGate/internal/protocol/play"
@@ -67,5 +68,33 @@ func TestRunPlayRejectsUnknownKeepAliveResponse(t *testing.T) {
 	err := RunPlay(context.Background(), clientFrames, clientProxy, backendProxy, Config{})
 	if !errors.Is(err, ErrUnexpectedBackendKeepAlive) {
 		t.Fatalf("bridge error=%v", err)
+	}
+}
+
+func TestRunPlayCancellationUnblocksBlockedClientWrite(t *testing.T) {
+	clientProxyConn, clientPeerConn := net.Pipe()
+	backendProxyConn, backendPeerConn := net.Pipe()
+	clientProxy := transport.New(clientProxyConn, 1024)
+	backendProxy := transport.New(backendProxyConn, 1024)
+	defer clientPeerConn.Close()
+	defer backendPeerConn.Close()
+	defer clientProxy.Close()
+	defer backendProxy.Close()
+
+	clientFrames := make(chan ClientFrame)
+	ctx, cancel := context.WithCancel(context.Background())
+	bridgeDone := make(chan error, 1)
+	go func() { bridgeDone <- RunPlay(ctx, clientFrames, clientProxy, backendProxy, Config{}) }()
+
+	go func() { _, _ = backendPeerConn.Write(codec.AppendVarInt(nil, 0x01)) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-bridgeDone:
+		if err == nil {
+			t.Fatal("bridge returned nil after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bridge did not unblock blocked client write")
 	}
 }
